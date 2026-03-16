@@ -74,7 +74,7 @@ export default function UserCard({ user, onClose, roomId }: UserCardProps) {
         const data = await response.json();
         alert(data.error || 'Ошибка изменения роли');
       }
-    } catch (error) {
+    } catch {
       alert('Ошибка сети');
     } finally {
       setIsLoading(false);
@@ -108,7 +108,7 @@ export default function UserCard({ user, onClose, roomId }: UserCardProps) {
         const data = await response.json();
         alert(data.error || 'Ошибка бана');
       }
-    } catch (error) {
+    } catch {
       alert('Ошибка сети');
     } finally {
       setIsLoading(false);

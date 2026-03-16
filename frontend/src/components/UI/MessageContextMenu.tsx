@@ -1,16 +1,20 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react';
-import { MoreHorizontal, Reply, Edit, Trash2, Copy } from 'lucide-react';
+import { MoreVertical, Reply, Edit, Trash2, Copy, User } from 'lucide-react';
 
 interface MessageContextMenuProps {
   messageId: string;
   content: string;
   isOwnMessage: boolean;
   isTextMessage: boolean;
+  senderId?: string;
+  senderName?: string;
+  alignRight?: boolean;
   onReply: (messageId: string) => void;
   onEdit: (messageId: string) => void;
   onDelete: (messageId: string) => void;
+  onOpenProfile?: (userId: string) => void;
   className?: string;
 }
 
@@ -19,13 +23,18 @@ export default function MessageContextMenu({
   content,
   isOwnMessage,
   isTextMessage,
+  senderId,
+  alignRight = true,
   onReply,
   onEdit,
   onDelete,
+  onOpenProfile,
   className = ''
 }: MessageContextMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<'bottom' | 'top'>('bottom');
   const menuRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -36,6 +45,20 @@ export default function MessageContextMenu({
 
     if (isOpen) {
       document.addEventListener('mousedown', handleClickOutside);
+      
+      // Проверяем позицию меню и корректируем если выходит за пределы экрана
+      if (buttonRef.current) {
+        const rect = buttonRef.current.getBoundingClientRect();
+        const spaceBelow = window.innerHeight - rect.bottom;
+        const spaceAbove = rect.top;
+        
+        // Если снизу мало места (меньше 200px), показываем сверху
+        if (spaceBelow < 200 && spaceAbove > spaceBelow) {
+          setMenuPosition('top');
+        } else {
+          setMenuPosition('bottom');
+        }
+      }
     }
 
     return () => {
@@ -67,18 +90,26 @@ export default function MessageContextMenu({
     setIsOpen(false);
   };
 
+  const handleOpenProfile = () => {
+    if (onOpenProfile && senderId) {
+      onOpenProfile(senderId);
+      setIsOpen(false);
+    }
+  };
+
   return (
     <div className={`relative ${className}`} ref={menuRef}>
       <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-all rounded"
-        title="More options"
+        ref={buttonRef}
+        onClick={() => { setIsOpen(!isOpen); }}
+        className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-all rounded opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+        title="Действия"
       >
-        <MoreHorizontal size={16} />
+        <MoreVertical size={16} />
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1 z-20 min-w-[120px] animate-fade-in">
+        <div className={`absolute ${menuPosition === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'} ${alignRight ? 'right-0' : 'left-0'} bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1 z-20 min-w-[150px] animate-fade-in`}>
           {/* Reply */}
           <button
             onClick={handleReply}
@@ -96,6 +127,17 @@ export default function MessageContextMenu({
             >
               <Copy size={14} />
               <span>Копировать</span>
+            </button>
+          )}
+
+          {/* Open Profile (only for other users' messages) */}
+          {!isOwnMessage && onOpenProfile && senderId && (
+            <button
+              onClick={handleOpenProfile}
+              className="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2"
+            >
+              <User size={14} />
+              <span>Открыть профиль</span>
             </button>
           )}
 

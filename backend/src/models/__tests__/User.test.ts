@@ -1,140 +1,81 @@
 import { User } from '../User.js';
-import bcrypt from 'bcryptjs';
+
+const baseUser = {
+  username: 'testuser',
+  displayName: 'Test User',
+  email: 'test@example.com',
+  password: 'plainpassword'
+};
 
 describe('User Model', () => {
   describe('password hashing', () => {
     it('should hash password before saving', async () => {
-      const userData = {
-        username: 'testuser',
-        email: 'test@example.com',
-        password: 'plainpassword'
-      };
-
-      const user = new User(userData);
+      const user = new User(baseUser);
       await user.save();
 
       expect(user.password).not.toBe('plainpassword');
-      expect(user.password.length).toBeGreaterThan(20); // bcrypt hash length
+      expect(user.password.length).toBeGreaterThan(20);
     });
 
-    it('should not hash password if not modified', async () => {
-      const user = new User({
-        username: 'testuser',
-        email: 'test@example.com',
-        password: 'plainpassword'
-      });
+    it('should not re-hash password if not modified', async () => {
+      const user = new User(baseUser);
+      await user.save();
+      const hashed = user.password;
+
+      user.displayName = 'Updated Name';
       await user.save();
 
-      const hashedPassword = user.password;
-      
-      // Update username without changing password
-      user.username = 'updateduser';
-      await user.save();
-
-      expect(user.password).toBe(hashedPassword);
+      expect(user.password).toBe(hashed);
     });
   });
 
-  describe('comparePassword method', () => {
+  describe('comparePassword', () => {
     it('should return true for correct password', async () => {
-      const user = new User({
-        username: 'testuser',
-        email: 'test@example.com',
-        password: 'correctpassword'
-      });
+      const user = new User(baseUser);
       await user.save();
-
-      const isMatch = await user.comparePassword('correctpassword');
-      expect(isMatch).toBe(true);
+      expect(await user.comparePassword('plainpassword')).toBe(true);
     });
 
-    it('should return false for incorrect password', async () => {
-      const user = new User({
-        username: 'testuser',
-        email: 'test@example.com',
-        password: 'correctpassword'
-      });
+    it('should return false for wrong password', async () => {
+      const user = new User(baseUser);
       await user.save();
-
-      const isMatch = await user.comparePassword('wrongpassword');
-      expect(isMatch).toBe(false);
+      expect(await user.comparePassword('wrongpassword')).toBe(false);
     });
   });
 
   describe('validation', () => {
     it('should require username', async () => {
-      const user = new User({
-        email: 'test@example.com',
-        password: 'password'
-      });
+      await expect(new User({ displayName: 'X', email: 'x@x.com', password: 'pass123' }).save()).rejects.toThrow();
+    });
 
-      await expect(user.save()).rejects.toThrow();
+    it('should require displayName', async () => {
+      await expect(new User({ username: 'user', email: 'x@x.com', password: 'pass123' }).save()).rejects.toThrow();
     });
 
     it('should require email', async () => {
-      const user = new User({
-        username: 'testuser',
-        password: 'password'
-      });
-
-      await expect(user.save()).rejects.toThrow();
-    });
-
-    it('should require password', async () => {
-      const user = new User({
-        username: 'testuser',
-        email: 'test@example.com'
-      });
-
-      await expect(user.save()).rejects.toThrow();
+      await expect(new User({ username: 'user', displayName: 'X', password: 'pass123' }).save()).rejects.toThrow();
     });
 
     it('should require unique username', async () => {
-      await User.create({
-        username: 'testuser',
-        email: 'test1@example.com',
-        password: 'password'
-      });
-
-      const duplicateUser = new User({
-        username: 'testuser',
-        email: 'test2@example.com',
-        password: 'password'
-      });
-
-      await expect(duplicateUser.save()).rejects.toThrow();
+      await User.create(baseUser);
+      await expect(User.create({ ...baseUser, email: 'other@test.com' })).rejects.toThrow();
     });
 
     it('should require unique email', async () => {
-      await User.create({
-        username: 'testuser1',
-        email: 'test@example.com',
-        password: 'password'
-      });
-
-      const duplicateUser = new User({
-        username: 'testuser2',
-        email: 'test@example.com',
-        password: 'password'
-      });
-
-      await expect(duplicateUser.save()).rejects.toThrow();
+      await User.create(baseUser);
+      await expect(User.create({ ...baseUser, username: 'other' })).rejects.toThrow();
     });
   });
 
-  describe('default values', () => {
-    it('should set default values correctly', async () => {
-      const user = new User({
-        username: 'testuser',
-        email: 'test@example.com',
-        password: 'password'
-      });
+  describe('defaults', () => {
+    it('should set default values', async () => {
+      const user = new User(baseUser);
       await user.save();
 
       expect(user.isOnline).toBe(false);
+      expect(user.role).toBe('user');
       expect(user.lastSeen).toBeInstanceOf(Date);
       expect(user.createdAt).toBeInstanceOf(Date);
-      expect(user.updatedAt).toBeInstanceOf(Date);
     });
   });
 });

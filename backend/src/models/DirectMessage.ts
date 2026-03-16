@@ -13,6 +13,8 @@ export interface IDirectMessage extends Document {
   readAt?: Date;
   isEdited: boolean;
   editedAt?: Date;
+  isDeleted: boolean;
+  deletedAt?: Date;
   replyTo?: mongoose.Types.ObjectId;
   reactions: Array<{
     user: mongoose.Types.ObjectId;
@@ -72,6 +74,14 @@ const directMessageSchema = new Schema<IDirectMessage>({
     default: false
   },
   editedAt: {
+    type: Date,
+    default: null
+  },
+  isDeleted: {
+    type: Boolean,
+    default: false
+  },
+  deletedAt: {
     type: Date,
     default: null
   },

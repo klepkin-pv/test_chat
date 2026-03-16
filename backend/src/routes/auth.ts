@@ -1,7 +1,10 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import path from 'path';
+import fs from 'fs';
 import { User } from '../models/User.js';
+import { upload } from '../middleware/upload.js';
 
 const router = express.Router();
 
@@ -15,7 +18,7 @@ const authenticateToken = async (req: any, res: any, next: any) => {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret') as any;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret_base_for_dev') as any;
     const user = await User.findById(decoded.userId);
     
     if (!user) {
@@ -65,7 +68,7 @@ router.post('/register', async (req, res) => {
     // Generate JWT
     const token = jwt.sign(
       { userId: user._id, username: user.username },
-      process.env.JWT_SECRET || 'fallback_secret',
+      process.env.JWT_SECRET || 'secret_base_for_dev',
       { expiresIn: '7d' }
     );
 
@@ -75,8 +78,10 @@ router.post('/register', async (req, res) => {
       user: {
         id: user._id,
         username: user.username,
+        displayName: user.displayName,
         email: user.email,
-        avatar: user.avatar
+        avatar: user.avatar,
+        role: user.role
       }
     });
 
@@ -95,11 +100,11 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Username/email and password are required' });
     }
 
-    // Find user by username or email
+    // Find user by username or email (case-insensitive)
     const user = await User.findOne({
       $or: [
-        ...(username ? [{ username }] : []),
-        ...(email ? [{ email }] : [])
+        ...(username ? [{ username: { $regex: new RegExp(`^${username}$`, 'i') } }] : []),
+        ...(email ? [{ email: { $regex: new RegExp(`^${email}$`, 'i') } }] : [])
       ]
     });
 
@@ -116,7 +121,7 @@ router.post('/login', async (req, res) => {
     // Generate JWT
     const token = jwt.sign(
       { userId: user._id, username: user.username },
-      process.env.JWT_SECRET || 'fallback_secret',
+      process.env.JWT_SECRET || 'secret_base_for_dev',
       { expiresIn: '7d' }
     );
 
@@ -126,8 +131,10 @@ router.post('/login', async (req, res) => {
       user: {
         id: user._id,
         username: user.username,
+        displayName: user.displayName,
         email: user.email,
-        avatar: user.avatar
+        avatar: user.avatar,
+        role: user.role
       }
     });
 
@@ -144,14 +151,92 @@ router.get('/me', authenticateToken, async (req: any, res) => {
       user: {
         id: user._id,
         username: user.username,
+        displayName: user.displayName,
         email: user.email,
         avatar: user.avatar,
+        role: user.role,
         isOnline: user.isOnline,
         lastSeen: user.lastSeen
       }
     });
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Update profile
+router.put('/profile', authenticateToken, async (req: any, res) => {
+  try {
+    const { displayName, email, password } = req.body;
+    const user = req.user;
+
+    if (displayName !== undefined) user.displayName = displayName;
+    if (email) user.email = email;
+    if (password) user.password = password; // Will be hashed by pre-save hook
+
+    await user.save();
+
+    res.json({
+      message: 'Profile updated successfully',
+      user: {
+        id: user._id,
+        username: user.username,
+        displayName: user.displayName,
+        email: user.email,
+        avatar: user.avatar,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error during profile update' });
+  }
+});
+
+// Get user info by ID
+router.get('/users/:userId', authenticateToken, async (req: any, res) => {
+  try {
+    const { userId } = req.params;
+    
+    const user = await User.findById(userId).select('-password -email');
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({
+      user: {
+        _id: user._id,
+        username: user.username,
+        displayName: user.displayName,
+        avatar: user.avatar,
+        role: user.role,
+        isOnline: user.isOnline,
+        lastSeen: user.lastSeen
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Upload user avatar
+router.post('/avatar', authenticateToken, upload.single('avatar'), async (req: any, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+    const user = req.user;
+    // Delete old avatar file if exists
+    if (user.avatar) {
+      const oldPath = path.join(process.cwd(), 'uploads', 'images', path.basename(user.avatar));
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    }
+    const avatarUrl = `/uploads/images/${req.file.filename}`;
+    user.avatar = avatarUrl;
+    await user.save();
+    res.json({ avatar: avatarUrl });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to upload avatar' });
   }
 });
 

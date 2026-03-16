@@ -1,7 +1,12 @@
 import express from 'express';
+import path from 'path';
+import fs from 'fs';
 import { User } from '../models/User.js';
 import { Ban } from '../models/Ban.js';
+import { Room } from '../models/Room.js';
+import { AppSettings, DEFAULT_REACTIONS } from '../models/AppSettings.js';
 import { authenticate, requireRole, protectSuperAdmin, AuthRequest } from '../middleware/auth.js';
+import { upload } from '../middleware/upload.js';
 
 const router = express.Router();
 
@@ -188,6 +193,101 @@ router.get('/users/:userId/ban-status',
       res.json({ isBanned: false });
     } catch (error) {
       res.status(500).json({ error: 'Failed to check ban status' });
+    }
+});
+
+// Получить реакции конкретной комнаты
+router.get('/rooms/:roomId/reactions',
+  authenticate,
+  async (_req, res) => {
+    try {
+      const room = await Room.findById(_req.params.roomId);
+      if (!room) return res.status(404).json({ error: 'Room not found' });
+      const reactions = room.reactions && room.reactions.length > 0
+        ? room.reactions
+        : DEFAULT_REACTIONS;
+      res.json({ reactions });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch reactions' });
+    }
+});
+
+// Обновить реакции конкретной комнаты (только админы)
+router.put('/rooms/:roomId/reactions',
+  authenticate,
+  requireRole('admin'),
+  async (req: AuthRequest, res) => {
+    try {
+      const { reactions } = req.body;
+      if (!Array.isArray(reactions) || reactions.length === 0) {
+        return res.status(400).json({ error: 'reactions must be a non-empty array' });
+      }
+      const room = await Room.findByIdAndUpdate(
+        req.params.roomId,
+        { reactions },
+        { new: true }
+      );
+      if (!room) return res.status(404).json({ error: 'Room not found' });
+      res.json({ success: true, reactions });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to update reactions' });
+    }
+});
+
+// Получить список реакций (глобальные)
+router.get('/reactions',
+  authenticate,
+  async (_req, res) => {
+    try {
+      const setting = await AppSettings.findOne({ key: 'reactions' });
+      res.json({ reactions: setting ? setting.value : DEFAULT_REACTIONS });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch reactions' });
+    }
+});
+
+// Обновить список реакций (только админы)
+router.put('/reactions',
+  authenticate,
+  requireRole('admin'),
+  async (req: AuthRequest, res) => {
+    try {
+      const { reactions } = req.body;
+      if (!Array.isArray(reactions) || reactions.length === 0) {
+        return res.status(400).json({ error: 'reactions must be a non-empty array' });
+      }
+      await AppSettings.findOneAndUpdate(
+        { key: 'reactions' },
+        { key: 'reactions', value: reactions },
+        { upsert: true, new: true }
+      );
+      res.json({ success: true, reactions });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to update reactions' });
+    }
+});
+
+// Upload room avatar (admin only)
+router.post('/rooms/:roomId/avatar',
+  authenticate,
+  requireRole('admin'),
+  upload.single('avatar'),
+  async (req: AuthRequest, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+      const room = await Room.findById(req.params.roomId);
+      if (!room) return res.status(404).json({ error: 'Room not found' });
+      // Delete old avatar
+      if (room.avatar) {
+        const oldPath = path.join(process.cwd(), 'uploads', 'images', path.basename(room.avatar));
+        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+      }
+      const avatarUrl = `/uploads/images/${req.file.filename}`;
+      room.avatar = avatarUrl;
+      await room.save();
+      res.json({ avatar: avatarUrl });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to upload room avatar' });
     }
 });
 

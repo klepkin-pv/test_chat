@@ -1,16 +1,19 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react';
-import { Send, Paperclip, MoreVertical, Block, X, Check, Edit2, Reply } from 'lucide-react';
+import { Send, Paperclip, MoreVertical, X, Check, Reply, Menu } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { soundManager } from '@/utils/sounds';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useWindowFocus } from '@/hooks/useWindowFocus';
+import { getDirectApiUrl } from '@/utils/api';
 import EmojiPicker from '@/components/UI/EmojiPicker';
 import FileUpload from '@/components/UI/FileUpload';
 import FileMessage from '@/components/UI/FileMessage';
 import MessageReactions from '@/components/UI/MessageReactions';
 import MessageContextMenu from '@/components/UI/MessageContextMenu';
+import MessageActions from '@/components/UI/MessageActions';
+import UserProfileCard from '@/components/User/UserProfileCard';
 
 interface DirectMessage {
   _id: string;
@@ -47,20 +50,27 @@ interface User {
   username: string;
   avatar?: string;
   isOnline: boolean;
+  role?: 'user' | 'moderator' | 'admin';
 }
 
 interface DirectMessageWindowProps {
   recipientId: string;
+  recipientInfo?: User;
   socket: any;
+  onClose?: () => void;
+  onToggleSidebar?: () => void;
+  onMessageSent?: () => void;
+  onOpenDirectMessage?: (userId: string) => void;
 }
 
-export default function DirectMessageWindow({ recipientId, socket }: DirectMessageWindowProps) {
+export default function DirectMessageWindow({ recipientId, recipientInfo, socket, onToggleSidebar, onMessageSent, onOpenDirectMessage }: DirectMessageWindowProps) {
   const { user } = useAuthStore();
   const [messages, setMessages] = useState<DirectMessage[]>([]);
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
   const [recipient, setRecipient] = useState<User | null>(null);
   const [messageText, setMessageText] = useState('');
   const [showFileUpload, setShowFileUpload] = useState(false);
-  const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showUserProfile, setShowUserProfile] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
@@ -72,12 +82,70 @@ export default function DirectMessageWindow({ recipientId, socket }: DirectMessa
     currentUserId: user?.id
   });
 
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const markMessagesAsRead = () => {
+    if (socket && recipientId) {
+      socket.emit('mark_direct_messages_read', { senderId: recipientId });
+      // Close any push notification for this DM conversation
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistration('/chat/').then(reg => {
+          reg?.active?.postMessage({ type: 'CLOSE_NOTIFICATION', tag: `dm-${recipientId}` });
+        });
+      }
+    }
+  };
+
+  const loadMessages = async () => {
+    try {
+      const response = await fetch(`${getDirectApiUrl()}/messages/${recipientId}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'userid': user?.id || ''
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setMessages(data.messages);
+        
+        if (data.messages.length > 0) {
+          const firstMessage = data.messages[0];
+          const recipientInfo = firstMessage.sender._id === user?.id 
+            ? firstMessage.recipient 
+            : firstMessage.sender;
+          setRecipient(recipientInfo);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load messages:', error);
+    }
+  };
+
   useEffect(() => {
     if (recipientId) {
       loadMessages();
       markMessagesAsRead();
     }
   }, [recipientId]);
+
+  // Tell backend this dialog is open so push is suppressed
+  useEffect(() => {
+    if (!socket || !recipientId) return;
+    socket.emit('dm_opened', { withUserId: recipientId });
+    return () => {
+      socket.emit('dm_closed');
+    };
+  }, [socket, recipientId]);
+
+  useEffect(() => {
+    // Устанавливаем информацию о получателе если передана
+    if (recipientInfo) {
+      setRecipient(recipientInfo);
+    }
+  }, [recipientInfo]);
 
   useEffect(() => {
     if (!socket) return;
@@ -87,11 +155,31 @@ export default function DirectMessageWindow({ recipientId, socket }: DirectMessa
         (message.sender._id === recipientId && message.recipient._id === user?.id) ||
         (message.sender._id === user?.id && message.recipient._id === recipientId)
       ) {
-        setMessages(prev => [...prev, message]);
+        setMessages(prev => {
+          // Replace the last pending message from this user if it matches content
+          if (message.sender._id === user?.id) {
+            const pendingIdx = [...prev].reverse().findIndex(
+              m => m._id.startsWith('pending-') && m.content === message.content
+            );
+            if (pendingIdx !== -1) {
+              const realIdx = prev.length - 1 - pendingIdx;
+              const updated = [...prev];
+              updated[realIdx] = message;
+              setPendingIds(ids => { const s = new Set(ids); s.delete(prev[realIdx]._id); return s; });
+              return updated;
+            }
+          }
+          return [...prev, message];
+        });
         if (message.sender._id !== user?.id) {
-          soundManager.playMessageSound();
+          if (!isWindowFocused) {
+            soundManager.playMessageSound();
+          }
           showDirectMessageNotification(message);
           markMessagesAsRead();
+        }
+        if (onMessageSent) {
+          onMessageSent();
         }
       }
     };
@@ -118,11 +206,19 @@ export default function DirectMessageWindow({ recipientId, socket }: DirectMessa
       ));
     };
 
+    const handleDirectMessagesRead = ({ messageIds }: { messageIds?: string[]; readBy: string }) => {
+      if (!messageIds?.length) return;
+      setMessages(prev => prev.map(msg =>
+        messageIds.includes(msg._id) ? { ...msg, isRead: true } : msg
+      ));
+    };
+
     socket.on('new_direct_message', handleNewDirectMessage);
     socket.on('direct_message_edited', handleDirectMessageEdited);
     socket.on('direct_message_deleted', handleDirectMessageDeleted);
     socket.on('direct_reaction_added', handleDirectReactionAdded);
     socket.on('direct_reaction_removed', handleDirectReactionRemoved);
+    socket.on('direct_messages_read', handleDirectMessagesRead);
 
     return () => {
       socket.off('new_direct_message', handleNewDirectMessage);
@@ -130,6 +226,7 @@ export default function DirectMessageWindow({ recipientId, socket }: DirectMessa
       socket.off('direct_message_deleted', handleDirectMessageDeleted);
       socket.off('direct_reaction_added', handleDirectReactionAdded);
       socket.off('direct_reaction_removed', handleDirectReactionRemoved);
+      socket.off('direct_messages_read', handleDirectMessagesRead);
     };
   }, [socket, recipientId, user?.id]);
 
@@ -137,46 +234,24 @@ export default function DirectMessageWindow({ recipientId, socket }: DirectMessa
     scrollToBottom();
   }, [messages]);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  const loadMessages = async () => {
-    try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/direct/messages/${recipientId}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'userid': user?.id || ''
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setMessages(data.messages);
-        
-        // Get recipient info from first message
-        if (data.messages.length > 0) {
-          const firstMessage = data.messages[0];
-          const recipientInfo = firstMessage.sender._id === user?.id 
-            ? firstMessage.recipient 
-            : firstMessage.sender;
-          setRecipient(recipientInfo);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load messages:', error);
-    }
-  };
-
-  const markMessagesAsRead = () => {
-    if (socket && recipientId) {
-      socket.emit('mark_direct_messages_read', { senderId: recipientId });
-    }
-  };
-
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (messageText.trim() && socket) {
+    if (messageText.trim() && socket && user && recipient) {
+      const tempId = `pending-${Date.now()}`;
+      const optimistic: DirectMessage = {
+        _id: tempId,
+        content: messageText.trim(),
+        sender: { _id: user.id, username: user.username },
+        recipient: { _id: recipient._id, username: recipient.username },
+        messageType: 'text',
+        isRead: false,
+        reactions: [],
+        createdAt: new Date().toISOString(),
+        replyTo: replyingTo || undefined,
+      };
+      setMessages(prev => [...prev, optimistic]);
+      setPendingIds(prev => new Set(prev).add(tempId));
+
       socket.emit('send_direct_message', {
         recipientId,
         content: messageText.trim(),
@@ -252,29 +327,6 @@ export default function DirectMessageWindow({ recipientId, socket }: DirectMessa
     }
   };
 
-  const handleBlockUser = async () => {
-    if (!window.confirm(`Вы уверены, что хотите заблокировать ${recipient?.username}?`)) {
-      return;
-    }
-
-    try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/direct/block/${recipientId}`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'userid': user?.id || ''
-        }
-      });
-
-      if (response.ok) {
-        setShowUserMenu(false);
-        // Optionally redirect or show blocked state
-      }
-    } catch (error) {
-      console.error('Failed to block user:', error);
-    }
-  };
-
   const handleEmojiSelect = (emoji: string) => {
     setMessageText(prev => prev + emoji);
   };
@@ -292,7 +344,7 @@ export default function DirectMessageWindow({ recipientId, socket }: DirectMessa
 
   if (!recipient) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+      <div className="w-full h-full flex items-center justify-center bg-gray-50 dark:bg-gray-900">
         <div className="text-center">
           <div className="w-16 h-16 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4">
             <Send size={32} className="text-gray-400" />
@@ -306,11 +358,20 @@ export default function DirectMessageWindow({ recipientId, socket }: DirectMessa
   }
 
   return (
-    <div className="flex-1 flex flex-col">
-      {/* Header */}
-      <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+    <div className="w-full h-full relative overflow-hidden bg-gray-50 dark:bg-gray-900">
+      {/* Header - Sticky top */}
+      <div className="absolute top-0 left-0 right-0 z-10 p-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
+            {onToggleSidebar && (
+              <button
+                onClick={onToggleSidebar}
+                className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                title="Меню"
+              >
+                <Menu size={20} />
+              </button>
+            )}
             <div className="relative">
               <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center text-white font-semibold">
                 {recipient.username[0].toUpperCase()}
@@ -331,35 +392,18 @@ export default function DirectMessageWindow({ recipientId, socket }: DirectMessa
 
           <div className="relative">
             <button
-              onClick={() => setShowUserMenu(!showUserMenu)}
+              onClick={() => setShowUserProfile(true)}
               className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+              title="Профиль пользователя"
             >
               <MoreVertical size={20} />
             </button>
-
-            {showUserMenu && (
-              <>
-                <div 
-                  className="fixed inset-0 z-10" 
-                  onClick={() => setShowUserMenu(false)}
-                />
-                <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1 z-20 min-w-[120px]">
-                  <button
-                    onClick={handleBlockUser}
-                    className="w-full px-3 py-2 text-left text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center space-x-2"
-                  >
-                    <Block size={14} />
-                    <span>Заблокировать</span>
-                  </button>
-                </div>
-              </>
-            )}
           </div>
         </div>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 dark:bg-gray-900 chat-scrollbar">
+      <div className="absolute inset-0 overflow-y-auto p-4 space-y-4 chat-scrollbar" style={{ top: '73px', bottom: '73px' }}>
         {messages.map((message, index) => (
           <div
             key={message._id}
@@ -368,7 +412,7 @@ export default function DirectMessageWindow({ recipientId, socket }: DirectMessa
             }`}
             style={{ animationDelay: `${index * 0.05}s` }}
           >
-            <div className="flex flex-col max-w-xs lg:max-w-md">
+            <div className="flex flex-col max-w-xs lg:max-w-md relative group">
               {/* Reply indicator */}
               {message.replyTo && (
                 <div className="mb-1 px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded text-xs text-gray-600 dark:text-gray-400 border-l-2 border-indigo-500">
@@ -389,122 +433,130 @@ export default function DirectMessageWindow({ recipientId, socket }: DirectMessa
                 </div>
               )}
 
-              <div
-                className={`relative transition-all hover-lift ${
-                  message.sender._id === user?.id
-                    ? 'bg-indigo-500 text-white rounded-lg'
-                    : 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg shadow-sm'
-                }`}
+              <MessageActions
+                messageId={message._id}
+                isOwnMessage={message.sender._id === user?.id}
+                onReaction={handleAddReaction}
+                contextMenu={
+                  <MessageContextMenu
+                    messageId={message._id}
+                    content={message.content}
+                    isOwnMessage={message.sender._id === user?.id}
+                    isTextMessage={message.messageType === 'text'}
+                    senderId={message.sender._id}
+                    senderName={message.sender.username}
+                    alignRight={message.sender._id === user?.id}
+                    onReply={handleReplyToMessage}
+                    onEdit={handleEditMessage}
+                    onDelete={handleDeleteMessage}
+                    onOpenProfile={(userId) => {
+                      setRecipient({ _id: userId, username: message.sender.username, avatar: message.sender.avatar, isOnline: false });
+                      setShowUserProfile(true);
+                    }}
+                  />
+                }
               >
-                {/* Editing mode */}
-                {editingMessageId === message._id ? (
-                  <div className="p-4">
-                    <input
-                      type="text"
-                      value={editingText}
-                      onChange={(e) => setEditingText(e.target.value)}
-                      className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleSaveEdit();
-                        if (e.key === 'Escape') handleCancelEdit();
-                      }}
-                      autoFocus
-                    />
-                    <div className="flex space-x-2 mt-2">
-                      <button
-                        onClick={handleSaveEdit}
-                        className="text-xs px-2 py-1 bg-green-500 text-white rounded hover:bg-green-600"
-                      >
-                        <Check size={12} />
-                      </button>
-                      <button
-                        onClick={handleCancelEdit}
-                        className="text-xs px-2 py-1 bg-gray-500 text-white rounded hover:bg-gray-600"
-                      >
-                        <X size={12} />
-                      </button>
+                <div
+                  className={`relative transition-all hover-lift ${
+                    message.sender._id === user?.id
+                      ? 'bg-indigo-500 text-white rounded-lg'
+                      : 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg shadow-sm'
+                  } ${(message.reactions?.length > 0 && editingMessageId !== message._id) ? 'pb-3' : ''}`}
+                >                  {editingMessageId === message._id ? (
+                    <div className="p-4">
+                      <input
+                        type="text"
+                        value={editingText}
+                        onChange={(e) => setEditingText(e.target.value)}
+                        className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveEdit();
+                          if (e.key === 'Escape') handleCancelEdit();
+                        }}
+                        autoFocus
+                      />
+                      <div className="flex space-x-2 mt-2">
+                        <button onClick={handleSaveEdit} className="text-xs px-2 py-1 bg-green-500 text-white rounded hover:bg-green-600"><Check size={12} /></button>
+                        <button onClick={handleCancelEdit} className="text-xs px-2 py-1 bg-gray-500 text-white rounded hover:bg-gray-600"><X size={12} /></button>
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <>
-                    {/* File Message */}
-                    {(message.messageType === 'file' || message.messageType === 'image') && message.fileUrl ? (
-                      <div className={message.sender._id === user?.id ? 'p-2' : 'p-2'}>
-                        <FileMessage
-                          fileUrl={message.fileUrl}
-                          fileName={message.fileName || 'Файл'}
-                          fileSize={message.fileSize || 0}
-                          thumbnailUrl={message.thumbnailUrl}
-                          isImage={message.messageType === 'image'}
-                        />
-                        {message.content && message.content !== `📷 ${message.fileName}` && message.content !== `📎 ${message.fileName}` && (
-                          <p className="text-sm mt-2 px-2 pb-2">{message.content}</p>
-                        )}
-                      </div>
-                    ) : (
-                      /* Text Message */
-                      <div className="px-4 py-2">
-                        <p className="text-sm whitespace-pre-wrap">
-                          {message.content}
-                          {message.isEdited && (
-                            <span className="text-xs opacity-70 ml-2">(изменено)</span>
+                  ) : (
+                    <>
+                      {(message.messageType === 'file' || message.messageType === 'image') && message.fileUrl ? (
+                        <div className="p-2">
+                          <FileMessage fileUrl={message.fileUrl} fileName={message.fileName || 'Файл'} fileSize={message.fileSize || 0} thumbnailUrl={message.thumbnailUrl} isImage={message.messageType === 'image'} />
+                          {message.content && message.content !== `📷 ${message.fileName}` && message.content !== `📎 ${message.fileName}` && (
+                            <p className="text-sm mt-2 px-2 pb-2">{message.content}</p>
                           )}
-                        </p>
-                      </div>
+                        </div>
+                      ) : (
+                        <div className="px-4 pt-2 pb-1">
+                          <p className="text-sm whitespace-pre-wrap">
+                            {message.content}
+                            {message.isEdited && (
+                              <span className="inline-flex items-center ml-1 opacity-60" title="Изменено">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                              </span>
+                            )}
+                            {/* Время и статус inline после текста */}
+                            <span className={`inline-flex items-center gap-0.5 ml-2 align-bottom text-[10px] leading-none ${message.sender._id === user?.id ? 'text-indigo-200' : 'text-gray-400 dark:text-gray-500'}`}>
+                              {formatTime(message.createdAt)}
+                              {message.sender._id === user?.id && (
+                                <>
+                                  {pendingIds.has(message._id) ? (
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-yellow-300 opacity-80 inline"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                  ) : message.isRead ? (
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-green-300 inline"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 5l10 7 10-7"/><path d="M2 12l4 4 8-8"/></svg>
+                                  ) : (
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="opacity-60 inline"><rect x="2" y="5" width="20" height="14" rx="2"/><polyline points="2 5 12 13 22 5"/></svg>
+                                  )}
+                                </>
+                              )}
+                            </span>
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  <div className="px-4 pb-2">
+                    {(message.messageType === 'file' || message.messageType === 'image') && (
+                      <p className={`text-xs flex items-center gap-1 ${message.sender._id === user?.id ? 'text-indigo-100 justify-end' : 'text-gray-500 dark:text-gray-400'}`}>
+                        {formatTime(message.createdAt)}
+                        {message.sender._id === user?.id && (
+                          <span className="inline-flex items-center">
+                            {pendingIds.has(message._id) ? (
+                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-yellow-300 opacity-80"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                            ) : message.isRead ? (
+                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-green-300"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 5l10 7 10-7"/><path d="M2 12l4 4 8-8"/></svg>
+                            ) : (
+                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="opacity-60"><rect x="2" y="5" width="20" height="14" rx="2"/><polyline points="2 5 12 13 22 5"/></svg>
+                            )}
+                          </span>
+                        )}
+                      </p>
                     )}
-                  </>
-                )}
-
-                {/* Message actions */}
-                {message.sender._id === user?.id && (
-                  <div className="absolute top-2 right-2">
-                    <MessageContextMenu
-                      messageId={message._id}
-                      content={message.content}
-                      isOwnMessage={true}
-                      isTextMessage={message.messageType === 'text'}
-                      onReply={handleReplyToMessage}
-                      onEdit={handleEditMessage}
-                      onDelete={handleDeleteMessage}
-                    />
                   </div>
-                )}
-
-                <div className="flex items-center justify-between px-4 pb-2">
-                  <p
-                    className={`text-xs ${
-                      message.sender._id === user?.id
-                        ? 'text-indigo-100'
-                        : 'text-gray-500 dark:text-gray-400'
-                    }`}
-                  >
-                    {formatTime(message.createdAt)}
-                    {message.sender._id === user?.id && message.isRead && (
-                      <span className="ml-2">✓✓</span>
-                    )}
-                  </p>
+                  {editingMessageId !== message._id && (
+                    <MessageReactions
+                      messageId={message._id}
+                      reactions={message.reactions || []}
+                      currentUserId={user?.id || ''}
+                      onAddReaction={handleAddReaction}
+                      onRemoveReaction={handleRemoveReaction}
+                      isOwnMessage={message.sender._id === user?.id}
+                    />
+                  )}
                 </div>
-              </div>
+              </MessageActions>
 
-              {/* Message reactions */}
-              {editingMessageId !== message._id && (
-                <MessageReactions
-                  messageId={message._id}
-                  reactions={message.reactions || []}
-                  currentUserId={user?.id || ''}
-                  onAddReaction={handleAddReaction}
-                  onRemoveReaction={handleRemoveReaction}
-                  className="mt-1"
-                />
-              )}
             </div>
           </div>
         ))}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Message Input */}
-      <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+      {/* Message Input - Fixed bottom */}
+      <div className="absolute bottom-0 left-0 right-0 z-10 p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
         {/* Reply indicator */}
         {replyingTo && (
           <div className="mb-3 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg border-l-4 border-indigo-500">
@@ -570,6 +622,20 @@ export default function DirectMessageWindow({ recipientId, socket }: DirectMessa
         <FileUpload
           onFilesUploaded={handleFilesUploaded}
           onClose={() => setShowFileUpload(false)}
+        />
+      )}
+
+      {/* User Profile Card */}
+      {showUserProfile && recipient && (
+        <UserProfileCard
+          user={{
+            _id: recipient._id,
+            username: recipient.username,
+            role: recipient.role || 'user',
+            isOnline: recipient.isOnline
+          }}
+          onClose={() => setShowUserProfile(false)}
+          onOpenDirectMessage={onOpenDirectMessage}
         />
       )}
     </div>

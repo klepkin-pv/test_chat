@@ -15,6 +15,24 @@ export default function HomePage() {
     }
   }, [isAuthenticated, router])
 
+  // Обрабатываем навигацию от клика по пуш-уведомлению
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+
+    const handler = (event: MessageEvent) => {
+      if (event.data?.type === 'NAVIGATE' && event.data.url) {
+        const url = new URL(event.data.url, window.location.origin);
+        const room = url.searchParams.get('room');
+        const dm = url.searchParams.get('dm');
+        // Диспатчим кастомное событие — Chat компонент его поймает
+        window.dispatchEvent(new CustomEvent('push-navigate', { detail: { room, dm } }));
+      }
+    };
+
+    navigator.serviceWorker.addEventListener('message', handler);
+    return () => navigator.serviceWorker.removeEventListener('message', handler);
+  }, []);
+
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center">

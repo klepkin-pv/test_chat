@@ -12,6 +12,8 @@ export interface IMessage extends Document {
   thumbnailUrl?: string;
   isEdited: boolean;
   editedAt?: Date;
+  isDeleted: boolean;
+  deletedAt?: Date;
   replyTo?: mongoose.Types.ObjectId;
   reactions: Array<{
     user: mongoose.Types.ObjectId;
@@ -67,6 +69,14 @@ const messageSchema = new Schema<IMessage>({
     default: false
   },
   editedAt: {
+    type: Date,
+    default: null
+  },
+  isDeleted: {
+    type: Boolean,
+    default: false
+  },
+  deletedAt: {
     type: Date,
     default: null
   },

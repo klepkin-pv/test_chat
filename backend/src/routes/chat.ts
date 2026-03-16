@@ -1,9 +1,13 @@
 import express from 'express';
+import bcrypt from 'bcryptjs';
+import path from 'path';
+import fs from 'fs';
 import { Room } from '../models/Room.js';
 import { Message } from '../models/Message.js';
 import { User } from '../models/User.js';
 import { Ban } from '../models/Ban.js';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
+import { upload } from '../middleware/upload.js';
 
 const router = express.Router();
 
@@ -14,14 +18,20 @@ router.get('/rooms', async (req, res) => {
     
     // Получаем все комнаты
     const rooms = await Room.find({})
-      .populate('members', 'username avatar isOnline')
+      .populate('members', 'username displayName avatar isOnline role')
+      .populate('admins', 'username displayName avatar isOnline role')
+      .populate('owner', 'username displayName avatar isOnline role')
       .sort({ createdAt: -1 });
 
     // Добавляем информацию о членстве пользователя
-    const roomsWithMembership = rooms.map(room => ({
-      ...room.toObject(),
-      isMember: room.members.some((m: any) => m._id.toString() === userId)
-    }));
+    const roomsWithMembership = rooms.map(room => {
+      const obj = room.toObject() as any;
+      delete obj.password; // никогда не отдаём пароль клиенту
+      return {
+        ...obj,
+        isMember: room.members.some((m: any) => m._id.toString() === userId)
+      };
+    });
 
     res.json({ rooms: roomsWithMembership });
   } catch (error) {
@@ -42,15 +52,17 @@ router.post('/rooms', authenticate, async (req: AuthRequest, res) => {
     const room = new Room({
       name,
       description,
-      isPrivate,
-      password,
+      isPrivate: !!isPrivate,
+      password: isPrivate && password ? await bcrypt.hash(password, 10) : null,
       owner: req.user.id,
       members: [req.user.id],
       admins: [req.user.id]
     });
 
     await room.save();
-    await room.populate('members', 'username avatar isOnline');
+    await room.populate('members', 'username displayName avatar isOnline role');
+    await room.populate('admins', 'username displayName avatar isOnline role');
+    await room.populate('owner', 'username displayName avatar isOnline role');
 
     res.status(201).json({ room });
   } catch (error) {
@@ -59,10 +71,10 @@ router.post('/rooms', authenticate, async (req: AuthRequest, res) => {
 });
 
 // Join room
-router.post('/rooms/:roomId/join', async (req, res) => {
+router.post('/rooms/:roomId/join', authenticate, async (req: AuthRequest, res) => {
   try {
     const { roomId } = req.params;
-    const userId = req.headers.userid as string;
+    const userId = req.user!.id;
     const { password } = req.body;
 
     const room = await Room.findById(roomId);
@@ -70,11 +82,16 @@ router.post('/rooms/:roomId/join', async (req, res) => {
       return res.status(404).json({ error: 'Room not found' });
     }
 
-    if (room.isPrivate && room.password !== password) {
-      return res.status(400).json({ error: 'Invalid password' });
-    }
-
     if (!room.members.includes(userId as any)) {
+      if (room.isPrivate && room.password) {
+        if (!password) {
+          return res.status(403).json({ error: 'Password required', requiresPassword: true });
+        }
+        const isMatch = await bcrypt.compare(password, room.password);
+        if (!isMatch) {
+          return res.status(403).json({ error: 'Invalid password', requiresPassword: true });
+        }
+      }
       room.members.push(userId as any);
       await room.save();
     }
@@ -162,7 +179,133 @@ router.post('/search', async (req, res) => {
   }
 });
 
-export default router;
+// Update room (только админы комнаты или owner)
+router.put('/rooms/:roomId', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const { roomId } = req.params;
+    const { name, description, isPrivate, password } = req.body;
+    
+    console.log('PUT /rooms/:roomId - User:', req.user);
+    console.log('PUT /rooms/:roomId - Body:', { name, description });
+    
+    const room = await Room.findById(roomId);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+
+    // Проверка прав (owner или admin комнаты или глобальный админ)
+    const isOwner = room.owner.toString() === req.user?.id;
+    const isRoomAdmin = room.admins.some((admin: any) => admin.toString() === req.user?.id);
+    const isGlobalAdmin = req.user?.role === 'admin';
+
+    console.log('PUT /rooms/:roomId - Permissions:', { isOwner, isRoomAdmin, isGlobalAdmin });
+
+    if (!isOwner && !isRoomAdmin && !isGlobalAdmin) {
+      return res.status(403).json({ error: 'Only room admins can edit this room' });
+    }
+
+    if (name) room.name = name;
+    if (description !== undefined) room.description = description;
+    if (isPrivate !== undefined) room.isPrivate = !!isPrivate;
+    if (isPrivate && password) room.password = await bcrypt.hash(password, 10);
+    if (isPrivate === false) room.password = null;
+
+    await room.save();
+    await room.populate('members', 'username displayName avatar isOnline role');
+    await room.populate('admins', 'username displayName avatar isOnline role');
+    await room.populate('owner', 'username displayName avatar isOnline role');
+
+    res.json({ room });
+  } catch (error) {
+    console.error('PUT /rooms/:roomId - Error:', error);
+    res.status(500).json({ error: 'Failed to update room' });
+  }
+});
+
+// Delete room (только owner или глобальный админ)
+router.delete('/rooms/:roomId', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const { roomId } = req.params;
+    
+    const room = await Room.findById(roomId);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found' });
+    }
+
+    // Проверка прав (только owner или глобальный админ)
+    const isOwner = room.owner.toString() === req.user?.id;
+    const isGlobalAdmin = req.user?.role === 'admin';
+
+    if (!isOwner && !isGlobalAdmin) {
+      return res.status(403).json({ error: 'Only room owner or global admin can delete this room' });
+    }
+
+    await Room.findByIdAndDelete(roomId);
+    // Также удаляем все сообщения комнаты
+    await Message.deleteMany({ room: roomId });
+
+    res.json({ message: 'Room deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete room' });
+  }
+});
+
+// Kick user from room (admin/moderator only)
+router.post('/rooms/:roomId/kick', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const { roomId } = req.params;
+    const { userId: targetUserId } = req.body;
+    const requesterId = req.user!.id;
+
+    const room = await Room.findById(roomId);
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+
+    const isOwner = room.owner.toString() === requesterId;
+    const isRoomAdmin = room.admins.some((a: any) => a.toString() === requesterId);
+    const isGlobalAdminOrMod = req.user?.role === 'admin' || req.user?.role === 'moderator';
+
+    if (!isOwner && !isRoomAdmin && !isGlobalAdminOrMod) {
+      return res.status(403).json({ error: 'No permission to kick users' });
+    }
+
+    // Cannot kick owner
+    if (room.owner.toString() === targetUserId) {
+      return res.status(400).json({ error: 'Cannot kick room owner' });
+    }
+
+    room.members = room.members.filter((m: any) => m.toString() !== targetUserId);
+    room.admins = room.admins.filter((a: any) => a.toString() !== targetUserId);
+    await room.save();
+
+    res.json({ message: 'User kicked successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to kick user' });
+  }
+});
+
+// Leave room (any member)
+router.post('/rooms/:roomId/leave', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const { roomId } = req.params;
+    const userId = req.user!.id;
+
+    const room = await Room.findById(roomId);
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+
+    if (room.owner.toString() === userId) {
+      return res.status(400).json({ error: 'Room owner cannot leave. Delete the room instead.' });
+    }
+
+    room.members = room.members.filter((m: any) => m.toString() !== userId);
+    room.admins = room.admins.filter((a: any) => a.toString() !== userId);
+    await room.save();
+
+    res.json({ message: 'Left room successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to leave room' });
+  }
+});
+
 // Get room members
 router.get('/rooms/:roomId/members', async (req, res) => {
   try {
@@ -364,3 +507,34 @@ export const checkUserBan = async (userId: string, roomId: string): Promise<bool
     return false;
   }
 };
+
+// Upload room avatar (admin only)
+router.post('/rooms/:roomId/avatar', authenticate, upload.single('avatar'), async (req: AuthRequest, res) => {
+  try {
+    const { roomId } = req.params;
+    const room = await Room.findById(roomId);
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+
+    const isAdmin = room.admins.some(a => a.toString() === req.user!.id) ||
+                    room.owner.toString() === req.user!.id ||
+                    req.user!.role === 'admin';
+    if (!isAdmin) return res.status(403).json({ error: 'Access denied' });
+
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+    // Delete old avatar
+    if (room.avatar) {
+      const oldPath = path.join(process.cwd(), 'uploads', 'images', path.basename(room.avatar));
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    }
+
+    const avatarUrl = `/uploads/images/${req.file.filename}`;
+    room.avatar = avatarUrl;
+    await room.save();
+    res.json({ avatar: avatarUrl });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update room avatar' });
+  }
+});
+
+export default router;

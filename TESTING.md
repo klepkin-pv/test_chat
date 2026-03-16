@@ -1,149 +1,67 @@
-# 🧪 Тестирование Chat Real
+# Testing
 
-## 📋 Типы тестов
-
-- **Unit тесты** - тестируют отдельные функции и компоненты (Jest)
-- **E2E тесты** - тестируют полные пользовательские сценарии (Playwright)
-
-## 🚀 Запуск тестов
-
-### Unit тесты (без Docker)
+## Запуск тестов
 
 ```bash
-# Frontend
-cd frontend
-npm install
-npm run test              # Все тесты
-npm run test:watch        # Режим наблюдения
-npm run test:coverage     # С покрытием кода
-
-# Backend  
 cd backend
-npm install
-npm run test              # Все тесты
-npm run test:watch        # Режим наблюдения
-npm run test:coverage     # С покрытием кода
+
+# Все тесты
+npm test
+
+# С покрытием
+npm run test:coverage
+
+# Watch-режим (разработка)
+npm run test:watch
 ```
 
-### E2E тесты (требуют запущенный проект)
+## Структура
 
-```bash
-# 1. Запустить проект в Docker
-docker-compose up --build -d
-
-# 2. Дождаться готовности (фронтенд на :5175, бэкенд на :4000)
-
-# 3. Запустить E2E тесты
-cd frontend
-npm install
-npx playwright install    # Первый раз
-npm run test:e2e         # Запуск тестов
-npm run test:e2e:ui      # С UI интерфейсом
+```
+backend/src/
+├── models/__tests__/
+│   ├── User.test.ts      — модель пользователя
+│   ├── Room.test.ts      — модель комнаты
+│   └── Message.test.ts   — модель сообщения
+├── routes/__tests__/
+│   └── auth.test.ts      — роуты аутентификации
+└── test/
+    └── setup.ts          — MongoDB in-memory, очистка между тестами
 ```
 
-## 📁 Структура тестов
+## Что покрыто
 
-### Frontend
-```
-frontend/
-├── src/
-│   ├── components/UI/__tests__/
-│   ├── store/__tests__/
-│   ├── utils/__tests__/
-│   └── hooks/__tests__/
-├── e2e/
-├── jest.config.js
-└── playwright.config.ts
-```
+### User.test.ts
+- Хэширование пароля при сохранении
+- Повторное сохранение не перехэширует пароль
+- `comparePassword` — верный/неверный пароль
+- Валидация обязательных полей (username, displayName, email)
+- Уникальность username и email
+- Дефолтные значения (isOnline, role, lastSeen)
 
-### Backend
-```
-backend/
-├── src/
-│   ├── models/__tests__/
-│   ├── routes/__tests__/
-│   └── test/setup.ts
-└── jest.config.js
-```
+### Room.test.ts
+- Создание комнаты с обязательными полями
+- Валидация (name required, owner required, maxlength 50)
+- Приватные комнаты (isPrivate, password)
+- Добавление/удаление участников
+- Кастомные реакции (массив emoji, дефолт null)
 
-## 🔧 CI/CD интеграция
+### Message.test.ts
+- Создание текстового сообщения
+- Валидация (content required, sender required, maxlength 2000)
+- Типы сообщений (text, image, file, system)
+- Реакции на сообщения
+- Флаги isEdited / isDeleted
 
-### GitHub Actions
+### auth.test.ts
+- `POST /auth/register` — успешная регистрация, дубликат username, неполные данные
+- `POST /auth/login` — успешный вход, нечувствительность к регистру, неверный пароль, несуществующий пользователь
+- `GET /auth/me` — получение профиля, 401 без токена, 401 с невалидным токеном
 
-```yaml
-name: Tests
-on: [push, pull_request]
+## Окружение
 
-jobs:
-  unit-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-      
-      # Frontend Unit Tests
-      - name: Frontend Tests
-        run: |
-          cd frontend
-          npm ci
-          npm run test:coverage
-      
-      # Backend Unit Tests  
-      - name: Backend Tests
-        run: |
-          cd backend
-          npm ci
-          npm run test:coverage
+Тесты используют [mongodb-memory-server](https://github.com/nodkz/mongodb-memory-server) — реальная MongoDB в памяти, без внешних зависимостей. Redis и Socket.io не мокируются — тесты покрывают только модели и HTTP-роуты.
 
-  e2e-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-      
-      # Start services
-      - name: Start Docker services
-        run: |
-          cp .env.example .env
-          docker-compose up --build -d
-          
-      # Wait for services
-      - name: Wait for services
-        run: |
-          timeout 60 bash -c 'until curl -f http://localhost:5175; do sleep 2; done'
-          timeout 60 bash -c 'until curl -f http://localhost:4000; do sleep 2; done'
-      
-      # Run E2E tests
-      - name: E2E Tests
-        run: |
-          cd frontend
-          npm ci
-          npx playwright install --with-deps
-          npm run test:e2e
-      
-      # Cleanup
-      - name: Stop services
-        run: docker-compose down
-```
+## Добавление тестов
 
-## 📊 Покрытие кода
-
-**Цель**: 70% для всех метрик (branches, functions, lines, statements)
-
-## 🧪 Что тестируется
-
-### Unit тесты
-- **Frontend**: NotificationManager, SoundManager, AuthStore, EmojiPicker
-- **Backend**: User Model, Auth Routes
-
-### E2E тесты  
-- **Аутентификация**: Регистрация, вход, валидация
-- **Чат**: Интерфейс, сообщения, эмодзи, настройки
-
----
-
-**Версия**: 1.0.0
+Файлы с тестами кладутся в `__tests__/` рядом с тестируемым модулем или роутом. Jest подхватывает их автоматически по паттерну `**/__tests__/**/*.ts`.

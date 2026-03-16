@@ -75,7 +75,7 @@ dist
 
 # Gatsby files
 .cache/
-public
+# public  ← removed: was incorrectly ignoring frontend/public/
 
 # Storybook build outputs
 .out
@@ -107,5 +107,4 @@ Thumbs.db
 
 # Docker
 .docker/
-
-TODO.md
+bin/

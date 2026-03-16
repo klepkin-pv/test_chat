@@ -41,9 +41,9 @@ export default function RoomManagement({ onClose }: RoomManagementProps) {
   });
 
   // Check if current user is admin or owner
-  const isAdmin = currentRoom?.admins.some(admin => admin._id === user?.id) || 
-                  currentRoom?.owner._id === user?.id;
-  const isOwner = currentRoom?.owner._id === user?.id;
+  const isAdmin = currentRoom?.admins?.some(admin => admin._id === user?.id) || 
+                  currentRoom?.owner?._id === user?.id;
+  const isOwner = currentRoom?.owner?._id === user?.id;
 
   useEffect(() => {
     if (currentRoom) {
@@ -193,8 +193,8 @@ export default function RoomManagement({ onClose }: RoomManagementProps) {
   };
 
   const getUserRole = (userId: string) => {
-    if (currentRoom?.owner._id === userId) return 'owner';
-    if (currentRoom?.admins.some(admin => admin._id === userId)) return 'admin';
+    if (currentRoom?.owner?._id === userId) return 'owner';
+    if (currentRoom?.admins?.some(admin => admin._id === userId)) return 'admin';
     return 'member';
   };
 

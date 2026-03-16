@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react';
-import { MessageCircle, Search, Plus, X, Block } from 'lucide-react';
+import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
+import { MessageCircle, Search, X } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
+import { getDirectApiUrl } from '@/utils/api';
 
 interface User {
   _id: string;
@@ -24,11 +25,12 @@ interface Conversation {
 }
 
 interface DirectMessagesProps {
-  onSelectConversation: (userId: string) => void;
-  selectedUserId?: string;
+  onSelectConversation: (userId: string, userInfo?: User) => void;
+  selectedUserId?: string | null;
+  socket?: any;
 }
 
-export default function DirectMessages({ onSelectConversation, selectedUserId }: DirectMessagesProps) {
+const DirectMessages = forwardRef<any, DirectMessagesProps>(({ onSelectConversation, selectedUserId, socket }, ref) => {
   const { user } = useAuthStore();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [showUserSearch, setShowUserSearch] = useState(false);
@@ -36,13 +38,63 @@ export default function DirectMessages({ onSelectConversation, selectedUserId }:
   const [searchResults, setSearchResults] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Expose methods to parent
+  useImperativeHandle(ref, () => ({
+    addConversation: (participant: User) => {
+      // Проверяем, нет ли уже этого пользователя в списке
+      setConversations(prevConversations => {
+        const exists = prevConversations.find(c => c.user._id === participant._id);
+        if (!exists) {
+          const newConversation: Conversation = {
+            user: participant,
+            lastMessage: {
+              _id: '',
+              content: 'Начните разговор...',
+              sender: '',
+              createdAt: new Date().toISOString(),
+              messageType: 'text'
+            },
+            unreadCount: 0
+          };
+          return [newConversation, ...prevConversations];
+        }
+        return prevConversations;
+      });
+    },
+    refreshConversations: () => {
+      loadConversations();
+    }
+  }));
+
   useEffect(() => {
     loadConversations();
   }, []);
 
+  useEffect(() => {
+    // Обновляем список когда выбран новый пользователь
+    if (selectedUserId) {
+      loadConversations();
+    }
+  }, [selectedUserId]);
+
+  useEffect(() => {
+    // Слушаем новые сообщения и обновляем список
+    if (!socket) return;
+
+    const handleNewDirectMessage = () => {
+      loadConversations();
+    };
+
+    socket.on('new_direct_message', handleNewDirectMessage);
+
+    return () => {
+      socket.off('new_direct_message', handleNewDirectMessage);
+    };
+  }, [socket]);
+
   const loadConversations = async () => {
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/direct/conversations`, {
+      const response = await fetch(`${getDirectApiUrl()}/conversations`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
           'userid': user?.id || ''
@@ -51,7 +103,10 @@ export default function DirectMessages({ onSelectConversation, selectedUserId }:
 
       if (response.ok) {
         const data = await response.json();
-        setConversations(data.conversations);
+        console.log('Loaded conversations:', data.conversations);
+        setConversations(data.conversations || []);
+      } else {
+        console.error('Failed to load conversations:', response.status);
       }
     } catch (error) {
       console.error('Failed to load conversations:', error);
@@ -66,7 +121,7 @@ export default function DirectMessages({ onSelectConversation, selectedUserId }:
 
     setIsLoading(true);
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/direct/users/search?q=${encodeURIComponent(query)}`, {
+      const response = await fetch(`${getDirectApiUrl()}/users/search?q=${encodeURIComponent(query)}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
           'userid': user?.id || ''
@@ -90,8 +145,28 @@ export default function DirectMessages({ onSelectConversation, selectedUserId }:
     searchUsers(query);
   };
 
-  const handleStartConversation = (selectedUser: User) => {
-    onSelectConversation(selectedUser._id);
+  const handleStartConversation = async (selectedUser: User) => {
+    // Добавляем пользователя в список диалогов локально
+    setConversations(prevConversations => {
+      const exists = prevConversations.find(c => c.user._id === selectedUser._id);
+      if (!exists) {
+        const newConversation: Conversation = {
+          user: selectedUser,
+          lastMessage: {
+            _id: '',
+            content: 'Начните разговор...',
+            sender: '',
+            createdAt: new Date().toISOString(),
+            messageType: 'text'
+          },
+          unreadCount: 0
+        };
+        return [newConversation, ...prevConversations];
+      }
+      return prevConversations;
+    });
+    
+    onSelectConversation(selectedUser._id, selectedUser);
     setShowUserSearch(false);
     setSearchQuery('');
     setSearchResults([]);
@@ -118,24 +193,7 @@ export default function DirectMessages({ onSelectConversation, selectedUserId }:
   };
 
   return (
-    <div className="w-80 bg-gray-100 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
-      {/* Header */}
-      <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-gray-900 dark:text-white flex items-center">
-            <MessageCircle size={20} className="mr-2" />
-            Сообщения
-          </h3>
-          <button
-            onClick={() => setShowUserSearch(true)}
-            className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors button-press"
-            title="Новое сообщение"
-          >
-            <Plus size={18} />
-          </button>
-        </div>
-      </div>
-
+    <div className="flex-1 bg-gray-100 dark:bg-gray-800 flex flex-col h-full">
       {/* Conversations */}
       <div className="flex-1 overflow-y-auto chat-scrollbar">
         {conversations.length === 0 ? (
@@ -149,7 +207,7 @@ export default function DirectMessages({ onSelectConversation, selectedUserId }:
             {conversations.map((conversation) => (
               <button
                 key={conversation.user._id}
-                onClick={() => onSelectConversation(conversation.user._id)}
+                onClick={() => onSelectConversation(conversation.user._id, conversation.user)}
                 className={`w-full p-3 rounded-lg transition-all hover:bg-gray-200 dark:hover:bg-gray-700 text-left ${
                   selectedUserId === conversation.user._id
                     ? 'bg-indigo-100 dark:bg-indigo-900'
@@ -200,7 +258,7 @@ export default function DirectMessages({ onSelectConversation, selectedUserId }:
             <div className="p-4 border-b border-gray-200 dark:border-gray-700">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                  Новое сообщение
+                  Начать чат
                 </h3>
                 <button
                   onClick={() => {
@@ -272,4 +330,8 @@ export default function DirectMessages({ onSelectConversation, selectedUserId }:
       )}
     </div>
   );
-}
+});
+
+DirectMessages.displayName = 'DirectMessages';
+
+export default DirectMessages;

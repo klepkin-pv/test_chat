@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { io, Socket } from 'socket.io-client';
+import { SOCKET_URL } from '@/utils/api';
 
 interface Message {
   _id: string;
@@ -29,12 +30,16 @@ interface Room {
   _id: string;
   name: string;
   description?: string;
+  isPrivate?: boolean;
   members: Array<{
     _id: string;
     username: string;
     avatar?: string;
     isOnline: boolean;
+    role?: 'user' | 'moderator' | 'admin';
   }>;
+  admins?: Array<{ _id: string; username: string }>;
+  owner?: { _id: string; username: string };
 }
 
 interface ChatState {
@@ -45,9 +50,10 @@ interface ChatState {
   typingUsers: string[];
   isConnected: boolean;
   unreadCounts: Record<string, number>; // roomId -> count
+  token: string | null; // Добавляем token в state
   connect: (token: string, userId: string, username: string) => void;
   disconnect: () => void;
-  joinRoom: (roomId: string) => void;
+  joinRoom: (roomId: string, password?: string) => Promise<{ requiresPassword?: boolean; error?: string }>;
   sendMessage: (content: string, fileData?: {
     messageType?: string;
     fileUrl?: string;
@@ -77,9 +83,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   typingUsers: [],
   isConnected: false,
   unreadCounts: {},
+  token: null,
 
   connect: (token, userId, username) => {
-    const socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:4000', {
+    set({ token }); // Сохраняем token в state
+    const socket = io(SOCKET_URL, {
       auth: { token }
     });
 
@@ -102,7 +110,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     });
 
-    socket.on('room_joined', ({ roomId, messages }) => {
+    socket.on('room_joined', ({ messages }) => {
       set({ messages });
     });
 
@@ -146,15 +154,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  joinRoom: (roomId) => {
-    const { socket, rooms } = get();
+  joinRoom: async (roomId, password) => {
+    const { socket, rooms, token } = get();
     const room = rooms.find(r => r._id === roomId);
-    if (socket && room) {
+    
+    if (socket && room && token) {
+      try {
+        const { getChatApiUrl } = await import('@/utils/api');
+        const apiUrl = getChatApiUrl();
+        
+        const response = await fetch(`${apiUrl}/rooms/${roomId}/join`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ password })
+        });
+        
+        console.log('Join room response:', response.status);
+        
+        if (!response.ok) {
+          const error = await response.json();
+          console.error('Failed to join room:', error);
+          return { requiresPassword: error.requiresPassword, error: error.error };
+        }
+        
+        console.log('Successfully joined room via HTTP');
+      } catch (error) {
+        console.error('Error joining room:', error);
+        return { error: 'Network error' };
+      }
+      
       socket.emit('join_room', roomId);
       set({ currentRoom: room, messages: [] });
-      // Mark room as read when joining
       get().markRoomAsRead(roomId);
+      return {};
     }
+    return { error: 'Cannot join room' };
   },
 
   sendMessage: (content, fileData, replyTo) => {
@@ -202,12 +236,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   searchMessages: async (roomId, query) => {
+    const { token } = get();
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/chat/search`, {
+      const { getChatApiUrl } = await import('@/utils/api');
+      const apiUrl = getChatApiUrl();
+      
+      const response = await fetch(`${apiUrl}/search`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({ roomId, query })
       });

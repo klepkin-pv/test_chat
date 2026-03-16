@@ -13,12 +13,11 @@ async function createSuperAdmin() {
     if (existingAdmin) {
       console.log('✅ Super admin already exists');
       
-      // Обновляем роль если нужно
-      if (existingAdmin.role !== 'admin') {
-        existingAdmin.role = 'admin';
-        await existingAdmin.save();
-        console.log('✅ Super admin role updated');
-      }
+      // Всегда обновляем роль на admin
+      existingAdmin.role = 'admin';
+      await existingAdmin.save();
+      console.log('✅ Super admin role updated to admin');
+      console.log(`Current role: ${existingAdmin.role}`);
       
       process.exit(0);
     }

@@ -3,12 +3,14 @@ import mongoose, { Document, Schema } from 'mongoose';
 export interface IRoom extends Document {
   name: string;
   description?: string;
+  avatar?: string;
   isPrivate: boolean;
   password?: string;
   members: mongoose.Types.ObjectId[];
   admins: mongoose.Types.ObjectId[];
   owner: mongoose.Types.ObjectId;
   maxMembers: number;
+  reactions?: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -23,6 +25,10 @@ const roomSchema = new Schema<IRoom>({
   description: {
     type: String,
     maxlength: 200
+  },
+  avatar: {
+    type: String,
+    default: null
   },
   isPrivate: {
     type: Boolean,
@@ -48,6 +54,10 @@ const roomSchema = new Schema<IRoom>({
   maxMembers: {
     type: Number,
     default: 100
+  },
+  reactions: {
+    type: [String],
+    default: null
   }
 }, {
   timestamps: true

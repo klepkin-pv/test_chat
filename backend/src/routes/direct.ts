@@ -1,4 +1,5 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import { DirectMessage } from '../models/DirectMessage.js';
 import { User } from '../models/User.js';
 import { Block } from '../models/Block.js';
@@ -9,14 +10,32 @@ const router = express.Router();
 router.get('/conversations', async (req, res) => {
   try {
     const userId = req.headers.userid as string;
+    const userObjectId = new mongoose.Types.ObjectId(userId);
+    console.log('GET /conversations - userId:', userId);
+
+    // Сначала проверим есть ли вообще сообщения
+    const allMessages = await DirectMessage.find({
+      $or: [
+        { sender: userObjectId },
+        { recipient: userObjectId }
+      ]
+    }).limit(5);
+    console.log('Total messages found:', allMessages.length);
+    if (allMessages.length > 0) {
+      console.log('Sample message:', {
+        sender: allMessages[0].sender,
+        recipient: allMessages[0].recipient,
+        content: allMessages[0].content.substring(0, 20)
+      });
+    }
 
     // Get all users who have exchanged messages with current user
     const conversations = await DirectMessage.aggregate([
       {
         $match: {
           $or: [
-            { sender: userId },
-            { recipient: userId }
+            { sender: userObjectId },
+            { recipient: userObjectId }
           ]
         }
       },
@@ -27,7 +46,7 @@ router.get('/conversations', async (req, res) => {
         $group: {
           _id: {
             $cond: [
-              { $eq: ['$sender', userId] },
+              { $eq: ['$sender', userObjectId] },
               '$recipient',
               '$sender'
             ]
@@ -38,7 +57,7 @@ router.get('/conversations', async (req, res) => {
               $cond: [
                 {
                   $and: [
-                    { $eq: ['$recipient', userId] },
+                    { $eq: ['$recipient', userObjectId] },
                     { $eq: ['$isRead', false] }
                   ]
                 },
@@ -77,9 +96,53 @@ router.get('/conversations', async (req, res) => {
       }
     ]);
 
+    console.log('Found conversations:', conversations.length);
     res.json({ conversations });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch conversations' });
+  }
+});
+
+// Create or get conversation with user
+router.post('/conversations', async (req, res) => {
+  try {
+    const currentUserId = req.headers.userid as string;
+    const { participantId } = req.body;
+
+    if (!participantId) {
+      return res.status(400).json({ error: 'Participant ID is required' });
+    }
+
+    if (currentUserId === participantId) {
+      return res.status(400).json({ error: 'Cannot create conversation with yourself' });
+    }
+
+    // Check if participant exists
+    const participant = await User.findById(participantId).select('username avatar isOnline');
+    if (!participant) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Check if users are blocked
+    const isBlocked = await Block.findOne({
+      $or: [
+        { blocker: currentUserId, blocked: participantId },
+        { blocker: participantId, blocked: currentUserId }
+      ]
+    });
+
+    if (isBlocked) {
+      return res.status(403).json({ error: 'Cannot create conversation with blocked user' });
+    }
+
+    // Return conversation info
+    res.json({ 
+      conversationId: participantId, // В директах conversationId = userId собеседника
+      participant 
+    });
+  } catch (error) {
+    console.error('Error creating conversation:', error);
+    res.status(500).json({ error: 'Failed to create conversation' });
   }
 });
 

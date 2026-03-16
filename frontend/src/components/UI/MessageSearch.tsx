@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { Search, X, ArrowUp, ArrowDown } from 'lucide-react';
+import { getChatApiUrl } from '@/utils/api';
 
 interface SearchResult {
   _id: string;
@@ -41,7 +42,7 @@ export default function MessageSearch({ roomId, onClose, onMessageSelect }: Mess
       setLoading(true);
       try {
         const response = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL}/chat/rooms/${roomId}/search?q=${encodeURIComponent(query.trim())}`
+          `${getChatApiUrl()}/rooms/${roomId}/search?q=${encodeURIComponent(query.trim())}`
         );
         
         if (response.ok) {

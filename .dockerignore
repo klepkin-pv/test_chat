@@ -3,8 +3,6 @@ npm-debug.log
 .git
 .gitignore
 README.md
-TODO.md
-TESTING.md
 .nyc_output
 coverage
 .cache
@@ -14,3 +12,4 @@ dist
 .DS_Store
 *.log
 data/
+bin/

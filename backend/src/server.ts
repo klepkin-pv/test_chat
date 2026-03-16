@@ -12,8 +12,16 @@ import chatRoutes from './routes/chat.js';
 import filesRoutes from './routes/files.js';
 import directRoutes from './routes/direct.js';
 import adminRoutes from './routes/admin.js';
+import favoritesRoutes from './routes/favorites.js';
+import pushRoutes from './routes/push.js';
 
-dotenv.config();
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 const app = express();
 const server = createServer(app);
@@ -21,11 +29,18 @@ const server = createServer(app);
 // Middleware
 app.use(helmet());
 app.use(cors({
-  origin: process.env.CLIENT_URL || "http://localhost:5175",
+  origin: [
+    process.env.CLIENT_URL || "http://localhost:5175",
+    "https://worksource.share.zrok.io",
+    "http://localhost:5176"
+  ],
   credentials: true
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Static uploads
+app.use('/uploads', express.static(path.join(__dirname, '../../uploads')));
 
 // Routes
 app.use('/auth', authRoutes);
@@ -33,11 +48,17 @@ app.use('/chat', chatRoutes);
 app.use('/files', filesRoutes);
 app.use('/direct', directRoutes);
 app.use('/admin', adminRoutes);
+app.use('/user', favoritesRoutes);
+app.use('/push', pushRoutes);
 
 // Socket.IO setup
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_URL || "http://localhost:5175",
+    origin: [
+      process.env.CLIENT_URL || "http://localhost:5175",
+      "https://worksource.share.zrok.io",
+      "http://localhost:5176"
+    ],
     methods: ["GET", "POST"]
   }
 });

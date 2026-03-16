@@ -6,6 +6,7 @@ import { User } from '../models/User.js';
 import { Block } from '../models/Block.js';
 import { redisClient } from '../config/redis.js';
 import { checkUserBan } from '../routes/chat.js';
+import { sendPushToUser } from '../utils/webPush.js';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -123,6 +124,32 @@ export const setupSocketHandlers = (io: Server) => {
 
         // Send to all users in the room
         io.to(data.roomId).emit('new_message', message);
+
+        // Push notifications to offline room members
+        const room = await Room.findById(data.roomId).select('members name');
+        if (room) {
+          const offlineMembers = await Promise.all(
+            room.members
+              .filter(memberId => memberId.toString() !== socket.userId)
+              .map(async (memberId) => {
+                const isOnline = await redisClient.get(`user:${memberId.toString()}`);
+                return isOnline ? null : memberId.toString();
+              })
+          );
+          const preview = data.content.length > 60 ? data.content.slice(0, 60) + '…' : data.content;
+          await Promise.all(
+            offlineMembers
+              .filter(Boolean)
+              .map(userId => sendPushToUser(userId!, {
+                title: `${room.name}`,
+                body: `${socket.username}: ${preview}`,
+                icon: '/chat/icons/icon-192.png',
+                badge: '/chat/icons/badge-72.png',
+                tag: `room-${data.roomId}`,   // группировка: один пуш на комнату
+                data: { roomId: data.roomId, type: 'room' }
+              }))
+          );
+        }
 
       } catch (error) {
         socket.emit('error', { message: 'Failed to send message' });
@@ -251,7 +278,10 @@ export const setupSocketHandlers = (io: Server) => {
           return;
         }
 
-        await Message.findByIdAndDelete(data.messageId);
+        // Soft delete - mark as deleted instead of removing
+        message.isDeleted = true;
+        message.deletedAt = new Date();
+        await message.save();
 
         io.to(message.room.toString()).emit('message_deleted', {
           messageId: data.messageId
@@ -275,6 +305,20 @@ export const setupSocketHandlers = (io: Server) => {
         
         // Remove from Redis
         await redisClient.del(`user:${socket.userId}`);
+        await redisClient.del(`dm_open:${socket.userId}`);
+      }
+    });
+
+    // Track which DM dialog is currently open (to suppress push)
+    socket.on('dm_opened', (data: { withUserId: string }) => {
+      if (socket.userId) {
+        redisClient.set(`dm_open:${socket.userId}`, data.withUserId, { EX: 3600 });
+      }
+    });
+
+    socket.on('dm_closed', () => {
+      if (socket.userId) {
+        redisClient.del(`dm_open:${socket.userId}`);
       }
     });
 
@@ -324,6 +368,8 @@ export const setupSocketHandlers = (io: Server) => {
         await message.populate('sender', 'username avatar');
         await message.populate('recipient', 'username avatar');
 
+        console.log('Direct message saved:', message._id, 'from:', socket.userId, 'to:', data.recipientId);
+
         // Send to sender
         socket.emit('new_direct_message', message);
 
@@ -331,6 +377,22 @@ export const setupSocketHandlers = (io: Server) => {
         const recipientSocketId = await redisClient.get(`user:${data.recipientId}`);
         if (recipientSocketId) {
           io.to(recipientSocketId).emit('new_direct_message', message);
+        }
+
+        // Send push unless recipient has THIS dialog open right now
+        const recipientOpenDm = await redisClient.get(`dm_open:${data.recipientId}`);
+        const isViewingThisDialog = recipientOpenDm === socket.userId;
+        console.log(`[push] recipientId=${data.recipientId}, dm_open=${recipientOpenDm}, senderId=${socket.userId}, willSendPush=${!isViewingThisDialog}`);
+        if (!isViewingThisDialog) {
+          const preview = data.content.length > 80 ? data.content.slice(0, 80) + '…' : data.content;
+          await sendPushToUser(data.recipientId, {
+            title: `Сообщение от ${socket.username}`,
+            body: preview,
+            icon: '/chat/icons/icon-192.png',
+            badge: '/chat/icons/badge-72.png',
+            tag: `dm-${socket.userId}`,
+            data: { senderId: socket.userId, type: 'direct' }
+          });
         }
 
       } catch (error) {
@@ -392,7 +454,11 @@ export const setupSocketHandlers = (io: Server) => {
         }
 
         const recipientId = message.recipient.toString();
-        await DirectMessage.findByIdAndDelete(data.messageId);
+        
+        // Soft delete - mark as deleted instead of removing
+        message.isDeleted = true;
+        message.deletedAt = new Date();
+        await message.save();
 
         // Send to both users
         socket.emit('direct_message_deleted', { messageId: data.messageId });
@@ -414,23 +480,26 @@ export const setupSocketHandlers = (io: Server) => {
       try {
         if (!socket.userId) return;
 
+        // Find unread message IDs before updating
+        const unreadMessages = await DirectMessage.find(
+          { sender: data.senderId, recipient: socket.userId, isRead: false },
+          { _id: 1 }
+        );
+        const messageIds = unreadMessages.map(m => m._id.toString());
+
+        if (messageIds.length === 0) return;
+
         await DirectMessage.updateMany(
-          {
-            sender: data.senderId,
-            recipient: socket.userId,
-            isRead: false
-          },
-          {
-            isRead: true,
-            readAt: new Date()
-          }
+          { _id: { $in: messageIds } },
+          { isRead: true, readAt: new Date() }
         );
 
-        // Notify sender that messages were read
+        // Notify sender that messages were read, with the specific IDs
         const senderSocketId = await redisClient.get(`user:${data.senderId}`);
         if (senderSocketId) {
           io.to(senderSocketId).emit('direct_messages_read', {
-            readBy: socket.userId
+            readBy: socket.userId,
+            messageIds
           });
         }
 
