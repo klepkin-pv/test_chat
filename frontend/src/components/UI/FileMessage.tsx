@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Download, Eye, File, Image as ImageIcon, FileText, Archive, X } from 'lucide-react';
+import { buildAbsoluteUrl } from '@/utils/api';
 
 interface FileMessageProps {
   fileUrl: string;
@@ -23,6 +24,9 @@ export default function FileMessage({
   const [showPreview, setShowPreview] = useState(false);
   const [imageError, setImageError] = useState(false);
 
+  const thumbnailSrc = buildAbsoluteUrl(thumbnailUrl);
+  const fileSrc = buildAbsoluteUrl(fileUrl);
+
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -33,7 +37,7 @@ export default function FileMessage({
 
   const getFileIcon = () => {
     const extension = fileName.split('.').pop()?.toLowerCase();
-    
+
     if (isImage) {
       return <ImageIcon size={20} className="text-blue-500" />;
     } else if (['pdf'].includes(extension || '')) {
@@ -48,8 +52,12 @@ export default function FileMessage({
   };
 
   const handleDownload = () => {
+    if (!fileSrc) {
+      return;
+    }
+
     const link = document.createElement('a');
-    link.href = `${process.env.NEXT_PUBLIC_API_URL}${fileUrl}`;
+    link.href = fileSrc;
     link.download = fileName;
     document.body.appendChild(link);
     link.click();
@@ -59,20 +67,21 @@ export default function FileMessage({
   const handlePreview = () => {
     if (isImage) {
       setShowPreview(true);
-    } else {
-      // Для не-изображений открываем в новой вкладке
-      window.open(`${process.env.NEXT_PUBLIC_API_URL}${fileUrl}`, '_blank');
+      return;
+    }
+
+    if (fileSrc) {
+      window.open(fileSrc, '_blank');
     }
   };
 
   return (
     <>
       <div className={`max-w-sm ${className}`}>
-        {isImage && thumbnailUrl && !imageError ? (
-          // Превью изображения
+        {isImage && thumbnailSrc && !imageError ? (
           <div className="relative group">
             <img
-              src={`${process.env.NEXT_PUBLIC_API_URL}${thumbnailUrl}`}
+              src={thumbnailSrc}
               alt={fileName}
               className="rounded-lg max-w-full h-auto cursor-pointer hover:opacity-90 transition-opacity"
               onClick={handlePreview}
@@ -101,7 +110,6 @@ export default function FileMessage({
             </div>
           </div>
         ) : (
-          // Обычный файл
           <div className="flex items-center space-x-3 p-3 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
             <div className="flex-shrink-0">
               {getFileIcon()}
@@ -136,8 +144,7 @@ export default function FileMessage({
         )}
       </div>
 
-      {/* Image Preview Modal */}
-      {showPreview && isImage && (
+      {showPreview && isImage && fileSrc && (
         <div className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center p-4">
           <div className="relative max-w-4xl max-h-full">
             <button
@@ -147,7 +154,7 @@ export default function FileMessage({
               <X size={24} />
             </button>
             <img
-              src={`${process.env.NEXT_PUBLIC_API_URL}${fileUrl}`}
+              src={fileSrc}
               alt={fileName}
               className="max-w-full max-h-full object-contain rounded-lg"
               onError={() => setImageError(true)}

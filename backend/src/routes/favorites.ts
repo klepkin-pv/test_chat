@@ -2,20 +2,20 @@ import express from 'express';
 import { Favorite } from '../models/Favorite.js';
 import { Block } from '../models/Block.js';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
+import { logger } from '../utils/logger.js';
 
 const router = express.Router();
 
 // Get my favorites
 router.get('/favorites', authenticate, async (req: AuthRequest, res) => {
   try {
-    console.log('GET /favorites - user:', req.user?.id);
     const favorites = await Favorite.find({ user: req.user!.id })
       .populate('favoriteUser', 'username displayName avatar isOnline role')
       .sort({ createdAt: -1 });
 
     res.json({ favorites: favorites.map(f => f.favoriteUser) });
   } catch (error) {
-    console.error('Error fetching favorites:', error);
+    logger.error('Error fetching favorites', error);
     res.status(500).json({ error: 'Failed to fetch favorites' });
   }
 });
@@ -24,7 +24,6 @@ router.get('/favorites', authenticate, async (req: AuthRequest, res) => {
 router.post('/favorites/:userId', authenticate, async (req: AuthRequest, res) => {
   try {
     const { userId } = req.params;
-    console.log('POST /favorites/:userId - adding user:', userId, 'for:', req.user?.id);
 
     if (userId === req.user!.id) {
       return res.status(400).json({ error: 'Cannot add yourself to favorites' });
@@ -47,10 +46,9 @@ router.post('/favorites/:userId', authenticate, async (req: AuthRequest, res) =>
     await favorite.save();
     await favorite.populate('favoriteUser', 'username displayName avatar isOnline role');
 
-    console.log('Successfully added to favorites');
     res.json({ message: 'Added to favorites', user: favorite.favoriteUser });
   } catch (error) {
-    console.error('Error adding to favorites:', error);
+    logger.error('Error adding to favorites', error);
     res.status(500).json({ error: 'Failed to add to favorites' });
   }
 });

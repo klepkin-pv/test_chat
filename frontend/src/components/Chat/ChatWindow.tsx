@@ -16,7 +16,7 @@ import MessageActions from '@/components/UI/MessageActions';
 import MessageSearch from '@/components/UI/MessageSearch';
 import RoomParticipants from '@/components/Chat/RoomParticipants';
 import UserProfileCard from '@/components/User/UserProfileCard';
-import ReactionsEditor from '@/components/Admin/ReactionsEditor';
+import { buildAvatarUrl } from '@/utils/api';
 
 interface UploadedFile {
   id: string;
@@ -60,7 +60,6 @@ export default function ChatWindow({ sidebarOpen, onToggleSidebar, onOpenDirectM
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [showUserProfile, setShowUserProfile] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any>(null);
-  const [showReactionsEditor, setShowReactionsEditor] = useState(false);
 
   const isWindowFocused = useWindowFocus();
   const { showRoomMessageNotification } = useNotifications({
@@ -161,6 +160,19 @@ export default function ChatWindow({ sidebarOpen, onToggleSidebar, onOpenDirectM
     }, 3000);
   };
 
+  const jumpToMessage = (messageId: string) => {
+    setHighlightedMessageId(messageId);
+
+    const messageElement = document.getElementById(`message-${messageId}`);
+    if (messageElement) {
+      messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    setTimeout(() => {
+      setHighlightedMessageId((current) => current === messageId ? null : current);
+    }, 3000);
+  };
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setMessageText(e.target.value);
     
@@ -249,11 +261,23 @@ export default function ChatWindow({ sidebarOpen, onToggleSidebar, onOpenDirectM
             </button>
             <button 
               onClick={() => setShowParticipants(true)}
-              className="flex-1 text-left hover:opacity-80 transition-opacity"
+              className="flex flex-1 items-center gap-3 min-w-0 text-left hover:opacity-80 transition-opacity"
             >
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                {currentRoom.name}
-              </h2>
+              <div className="relative flex-shrink-0">
+                <div className="w-11 h-11 rounded-full overflow-hidden bg-gray-300 dark:bg-gray-600 flex items-center justify-center">
+                  {buildAvatarUrl(currentRoom.avatar)
+                    ? <img src={buildAvatarUrl(currentRoom.avatar)!} alt={currentRoom.name} className="w-full h-full object-cover" />
+                    : <Send size={20} className="text-gray-500 dark:text-gray-300" />
+                  }
+                </div>
+                {currentRoom.members.filter(m => m.isOnline).length > 0 && (
+                  <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white dark:border-gray-800"></div>
+                )}
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
+                  {currentRoom.name}
+                </h2>
               <div className="flex items-center space-x-2">
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   {currentRoom.members.length} участников
@@ -266,6 +290,7 @@ export default function ChatWindow({ sidebarOpen, onToggleSidebar, onOpenDirectM
                     </span>
                   </div>
                 )}
+                </div>
               </div>
             </button>
           </div>
@@ -273,9 +298,9 @@ export default function ChatWindow({ sidebarOpen, onToggleSidebar, onOpenDirectM
           {/* Action buttons */}
           <div className="flex items-center space-x-2">
             {/* Reactions editor for admin */}
-            {user?.role === 'admin' && (
+            {user?.role === undefined && (
               <button
-                onClick={() => setShowReactionsEditor(true)}
+                onClick={undefined}
                 className="p-2 text-gray-500 hover:text-indigo-600 dark:text-gray-400 dark:hover:text-indigo-400 transition-colors button-press"
                 title="Настроить реакции"
               >
@@ -317,7 +342,11 @@ export default function ChatWindow({ sidebarOpen, onToggleSidebar, onOpenDirectM
             <div className="flex flex-col max-w-xs lg:max-w-md relative group">
               {/* Reply indicator */}
               {message.replyTo && (
-                <div className="mb-1 px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded text-xs text-gray-600 dark:text-gray-400 border-l-2 border-indigo-500">
+                <button
+                  type="button"
+                  onClick={() => jumpToMessage(message.replyTo!)}
+                  className="mb-1 w-full rounded border-l-2 border-indigo-500 bg-gray-100 px-2 py-1 text-left text-xs text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600"
+                >
                   <div className="flex items-center space-x-1">
                     <Reply size={12} />
                     <span>Ответ на:</span>
@@ -332,7 +361,7 @@ export default function ChatWindow({ sidebarOpen, onToggleSidebar, onOpenDirectM
                       <p className="italic">Сообщение удалено</p>
                     );
                   })()}
-                </div>
+                </button>
               )}
 
               <MessageActions
@@ -366,7 +395,7 @@ export default function ChatWindow({ sidebarOpen, onToggleSidebar, onOpenDirectM
                   className={`transition-all hover-lift ${
                     message.sender._id === user?.id
                       ? 'bg-indigo-500 text-white rounded-lg'
-                      : 'text-gray-900 dark:text-white'
+                      : 'bg-gray-100 border border-gray-200 text-gray-900 rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-white shadow-sm'
                   }`}
                 >
                   {message.sender._id !== user?.id && (
@@ -395,7 +424,7 @@ export default function ChatWindow({ sidebarOpen, onToggleSidebar, onOpenDirectM
                   ) : (
                     <>
                       {(message.messageType === 'file' || message.messageType === 'image') && message.fileUrl ? (
-                        <div className={message.sender._id === user?.id ? 'p-2' : 'p-0'}>
+                        <div className="p-2">
                           <FileMessage fileUrl={message.fileUrl} fileName={message.fileName || 'Файл'} fileSize={message.fileSize || 0} thumbnailUrl={message.thumbnailUrl} isImage={message.messageType === 'image'} />
                           {message.content && message.content !== `📷 ${message.fileName}` && message.content !== `📎 ${message.fileName}` && (
                             <p className="text-sm mt-2 px-2 pb-2">{message.content}</p>
@@ -549,14 +578,6 @@ export default function ChatWindow({ sidebarOpen, onToggleSidebar, onOpenDirectM
         />
       )}
 
-      {/* Reactions Editor */}
-      {showReactionsEditor && currentRoom && (
-        <ReactionsEditor
-          onClose={() => setShowReactionsEditor(false)}
-          roomId={currentRoom._id}
-          roomName={currentRoom.name}
-        />
-      )}
     </div>
   );
 }

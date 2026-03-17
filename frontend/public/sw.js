@@ -1,40 +1,37 @@
-// ChatReal Service Worker — push notifications only
-// Версия: 4 (без workbox)
-
 self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-  // Удаляем все кэши workbox и старые кэши
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.map((key) => {
-        console.log('[SW] Deleting cache:', key);
-        return caches.delete(key);
-      }))
+      Promise.all(keys.map((key) => caches.delete(key)))
     ).then(() => clients.claim())
   );
 });
 
-// Принудительная активация если застрял в waiting
+// Keep installability so Chrome treats this as a real PWA, not only a shortcut.
+self.addEventListener('fetch', () => {});
+
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
-  // Закрыть уведомление когда сообщение прочитано
+
   if (event.data?.type === 'CLOSE_NOTIFICATION' && event.data.tag) {
     self.registration.getNotifications({ tag: event.data.tag }).then((notifications) => {
-      notifications.forEach(n => n.close());
+      notifications.forEach((notification) => notification.close());
     });
   }
 });
 
-// Push notification received
 self.addEventListener('push', (event) => {
-  if (!event.data) return;
+  if (!event.data) {
+    return;
+  }
 
   let payload;
+
   try {
     payload = event.data.json();
   } catch {
@@ -49,25 +46,29 @@ self.addEventListener('push', (event) => {
     renotify: true,
     data: payload.data || {},
     actions: [
-      { action: 'open', title: 'Открыть' },
-      { action: 'dismiss', title: 'Закрыть' }
+      { action: 'open', title: 'Open' },
+      { action: 'dismiss', title: 'Dismiss' }
     ]
   };
 
-  event.waitUntil(
-    self.registration.showNotification(payload.title, options)
-  );
+  event.waitUntil(self.registration.showNotification(payload.title, options));
 });
 
-// Notification click
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  if (event.action === 'dismiss') return;
+
+  if (event.action === 'dismiss') {
+    return;
+  }
 
   const data = event.notification.data || {};
-  let url = '/chat';
-  if (data.type === 'room' && data.roomId) url = `/chat?room=${data.roomId}`;
-  else if (data.type === 'direct' && data.senderId) url = `/chat?dm=${data.senderId}`;
+  let url = '/chat/';
+
+  if (data.type === 'room' && data.roomId) {
+    url = `/chat/?room=${data.roomId}`;
+  } else if (data.type === 'direct' && data.senderId) {
+    url = `/chat/?dm=${data.senderId}`;
+  }
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
@@ -77,6 +78,7 @@ self.addEventListener('notificationclick', (event) => {
           return client.focus();
         }
       }
+
       return clients.openWindow(url);
     })
   );

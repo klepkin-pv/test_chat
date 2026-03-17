@@ -1,128 +1,178 @@
-# 💬 Chat Real
+# Chat Real
 
-Чат в реальном времени с WebSocket, комнатами, личными сообщениями, PWA и пуш-уведомлениями.
+Чат-приложение с комнатами, личными сообщениями, файлами, реакциями, PWA и web-push.
 
 ## Стек
 
-**Frontend:** Next.js 15, React 19, TypeScript, Tailwind CSS 4, Socket.io Client, Zustand  
-**Backend:** Node.js, Express.js, Socket.io, TypeScript, MongoDB, Mongoose, Redis, JWT  
-**DevOps:** Docker, Docker Compose
+- Frontend: Next.js 15, React, TypeScript, Tailwind CSS, Zustand, Socket.IO client
+- Backend: Node.js, Express, TypeScript, Socket.IO, MongoDB, Redis, JWT
+- Infra: nginx, Docker Compose
 
 ## Структура
 
-```
+```text
 chat_real/
-├── frontend/          # Next.js 15 приложение
-├── backend/           # Express.js API + Socket.io
-├── data/              # MongoDB и Redis данные
-├── restart.sh         # Скрипт перезапуска (Linux/Mac)
-├── restart.ps1        # Скрипт перезапуска (Windows)
+├── frontend/
+├── backend/
+├── uploads/
+├── restart.ps1
+├── restart.sh
+├── nginx.example.conf
+├── .env
+├── .env.example
 └── docker-compose.yml
 ```
 
-## Запуск
+## Конфигурация
 
-### Локальная разработка
+Основные URL и порты собраны в корневом `.env`.
 
-```bash
-# Backend
-cd backend && npm install && npm run dev
+Ключевые переменные:
 
-# Frontend (отдельный терминал)
-cd frontend && npm install && npm run dev
+- `APP_PROTOCOL` — протокол приложения, обычно `http` или `https`
+- `APP_HOST` — основной хост
+- `PUBLIC_ORIGIN` — внешний origin, например `https://worksource.share.zrok.io`
+- `NGINX_PORT` — локальный прокси-порт nginx
+- `FRONTEND_PORT` — локальный порт Next.js
+- `PORT` — локальный порт Express/Socket.IO
+- `MONGODB_PORT`
+- `REDIS_PORT`
+
+Фронтенд и бэкенд стараются автоматически определять режим запуска:
+
+- прямой локальный запуск `localhost:5176` использует локальный backend
+- запуск через nginx/zrok использует same-origin маршруты `/api`, `/uploads`, `/socket.io`
+
+## Быстрый старт
+
+Установка зависимостей:
+
+```powershell
+cd backend
+npm install
+
+cd ..\frontend
+npm install
 ```
 
-Приложение: **http://localhost:5176/chat**
+Запуск в Windows:
 
-### Скрипты перезапуска
-
-Если билдим — то запускаем через `start`, коиначе — через `dev`.
-
-```bash
-# Linux/Mac
-./restart.sh           # билд фронта → frontend: start, backend: dev
-./restart.sh -bf       # то же самое
-./restart.sh -bb       # билд бэка   → frontend: dev,   backend: start
-./restart.sh -bfb      # билд обоих  → оба: start
-
-# Windows PowerShell
-.\restart.ps1          # билд фронта → frontend: start, backend: dev
-.\restart.ps1 -bf      # то же самое
-.\restart.ps1 -bb      # билд бэка   → frontend: dev,   backend: start
-.\restart.ps1 -bfb     # билд обоих  → оба: start
+```powershell
+.\restart.ps1
+.\restart.ps1 -bf
+.\restart.ps1 -bb
+.\restart.ps1 -bfb
 ```
 
-### Docker (продакшен)
+Запуск в Linux/macOS:
 
 ```bash
-cp .env.docker .env
-docker-compose up --build -d
+./restart.sh
+./restart.sh -bf
+./restart.sh -bb
+./restart.sh -bfb
 ```
 
-Приложение: **http://localhost:5175/chat**
+Флаги:
 
-## Сервисы
+- `-bf` — build frontend, backend в dev
+- `-bb` — build backend, frontend в dev
+- `-bfb` — build frontend и backend, затем оба в production-режиме
 
-| Сервис    | Порт        |
-|-----------|-------------|
-| Frontend  | 5175 / 5176 |
-| Backend   | 4000        |
-| MongoDB   | 27018       |
-| Redis     | 6380        |
+Локальные адреса по умолчанию:
 
-## Возможности
+- frontend: `http://localhost:5176/chat`
+- backend: `http://localhost:4000`
+- nginx proxy: `http://localhost:5175/chat`
 
-- Регистрация и аутентификация (логин нечувствителен к регистру)
-- Система ролей: User / Moderator / Admin
-- Комнаты: публичные и приватные (с паролем), аватарки
-- Сообщения в реальном времени, индикатор набора текста
-- Личные сообщения (DM) со статусами доставки/прочтения
-- Реакции на сообщения (настраиваются админом)
-- Ответы на сообщения, редактирование, удаление
-- Отправка файлов и изображений
-- Аватарки пользователей и комнат
-- Статусы онлайн/оффлайн
-- Тёмная/светлая тема
-- Избранные пользователи, блокировки
-- Баны: временные/постоянные, в комнате/глобально
-- PWA — устанавливается на Android, iOS, Desktop
-- Пуш-уведомления (Web Push API, VAPID)
-- Поиск по сообщениям в комнате
-- ESC — закрывает/открывает боковую панель
-- Адаптивный дизайн
+## nginx
+
+Пример конфига лежит в [nginx.example.conf](/c:/projects/chat_real/nginx.example.conf).
+
+Для корректной работы нужны как минимум эти маршруты:
+
+- `/chat`
+- `/chat/_next`
+- `/api/`
+- `/uploads`
+- `/socket.io`
+
+Если меняете только `nginx.example.conf`, этого недостаточно: изменения нужно перенести в реальный nginx-конфиг и сделать reload nginx.
+
+Важно: для аватарок и файлов обязательно должен проксироваться `/uploads`.
+
+## Комнаты и аватарки
+
+- Данные об аватарке комнаты и пользователя приходят вместе с JSON-объектами, отдельный API-запрос за "метаданными аватарки" не нужен.
+- Само изображение затем загружается обычным запросом к `/uploads/...`.
+- Обновление комнаты и её аватарки можно отправлять одним `PUT /chat/rooms/:roomId` обычным JSON, передавая `avatarDataUrl`, чтобы не зависеть от multipart-upload на внешнем прокси.
+- Перед отправкой аватарка комнаты на фронтенде уменьшается и сжимается, чтобы обновление стабильнее проходило через proxy/zrok.
+
+## PWA
+
+Manifest и service worker настроены под запуск из `/chat/`.
+
+Если на Android/Chrome приложение раньше было добавлено как shortcut и при каждом запуске показывается баннер вида:
+
+- `Chrome`
+- `ChatReal`
+- `Нажмите, чтобы скопировать URL этого приложения`
+
+то после обновления нужно:
+
+1. удалить старый ярлык/установленное приложение
+2. открыть `/chat/`
+3. установить приложение заново
+
+Это нужно, чтобы Chrome подхватил обновлённые `manifest.json` и `sw.js` и воспринимал приложение как PWA, а не как обычный shortcut.
 
 ## Администрирование
 
-Создать супер-админа после первого запуска:
+Создание супер-админа:
 
 ```bash
-cd backend && npm run create-admin
+cd backend
+npm run create-admin
 ```
 
-Логин: `admin` / Пароль: `123123`
+Роли:
 
-### Роли
-- **User** — обычный пользователь
-- **Moderator** — баны в комнатах
-- **Admin** — управление ролями, глобальные баны, создание комнат, настройка реакций
+- `user` — обычный пользователь
+- `moderator` — модерация и баны по разрешённым сценариям
+- `admin` — глобальное администрирование, настройка реакций, комнаты, роли
 
-### Контекстные действия
-- **Правый клик** (десктоп) или **долгое нажатие** (мобиль) на вкладку комнат → создать комнату (только админ)
-- **Правый клик / долгое нажатие** на вкладку личных сообщений → начать новый чат
-- **Долгое нажатие** на сообщение (мобиль) → меню реакций
+## Реакции
 
-## Тесты
+- В пикере показываются первые 6 реакций + кнопка «Развернуть» для полного списка с вкладками (руки, сердца, лица и т.д.).
+- В личных сообщениях доступны все реакции. В комнатах — только те, что настроены для комнаты.
+- Уже поставленные реакции на сообщении: показываются первые 6, остальные скрыты за кнопкой `+N`.
+
+## Проверка и тесты
+
+Сборки:
 
 ```bash
-cd backend && npm test
+cd backend && npm run build
+cd frontend && npm run build
 ```
 
-Покрытие: модели User, Room, Message + роуты аутентификации.
+Тесты:
 
-## Безопасность
+```bash
+cd backend && npm test      # 41 тест
+cd frontend && npm test     # 22 теста
+```
 
-JWT, bcrypt, CORS, Helmet, валидация входных данных
+E2E (требует запущенного приложения):
 
-## Лицензия
+```bash
+cd frontend && npm run test:e2e
+```
 
-MIT — **Автор:** Klepkin Pavel
+Smoke-тест (`e2e/smoke.spec.ts`) проверяет: регистрация → создание комнаты → смена аватара → проверка через API что `room.avatar` не пустой.
+
+## Что важно помнить
+
+- После изменения `.env` нужно перезапускать процессы.
+- После изменения nginx-конфига нужен reload nginx.
+- После изменения `manifest.json` или `sw.js` на телефоне может потребоваться переустановка PWA.

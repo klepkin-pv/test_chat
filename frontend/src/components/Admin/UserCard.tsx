@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useAuthStore } from '@/store/authStore';
 import { X, Shield, ShieldOff, Ban, UserX } from 'lucide-react';
+import { ADMIN_API_URL } from '@/utils/api';
 
 interface UserCardProps {
   user: {
@@ -21,7 +22,7 @@ export default function UserCard({ user, onClose, roomId }: UserCardProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [banForm, setBanForm] = useState({
     reason: '',
-    duration: 0, // 0 = permanent
+    duration: 0,
     scope: 'room' as 'room' | 'global'
   });
 
@@ -56,7 +57,7 @@ export default function UserCard({ user, onClose, roomId }: UserCardProps) {
     setIsLoading(true);
     try {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/admin/users/${user._id}/role`,
+        `${ADMIN_API_URL}/users/${user._id}/role`,
         {
           method: 'POST',
           headers: {
@@ -87,7 +88,7 @@ export default function UserCard({ user, onClose, roomId }: UserCardProps) {
     setIsLoading(true);
     try {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/admin/users/${user._id}/ban`,
+        `${ADMIN_API_URL}/users/${user._id}/ban`,
         {
           method: 'POST',
           headers: {
@@ -198,7 +199,7 @@ export default function UserCard({ user, onClose, roomId }: UserCardProps) {
                   type="number"
                   min="0"
                   value={banForm.duration}
-                  onChange={(e) => setBanForm({ ...banForm, duration: parseInt(e.target.value) || 0 })}
+                  onChange={(e) => setBanForm({ ...banForm, duration: parseInt(e.target.value, 10) || 0 })}
                   className="w-full px-3 py-2 border rounded dark:bg-gray-700 dark:border-gray-600"
                 />
               </div>

@@ -6,7 +6,7 @@ import { Ban } from '../models/Ban.js';
 import { Room } from '../models/Room.js';
 import { AppSettings, DEFAULT_REACTIONS } from '../models/AppSettings.js';
 import { authenticate, requireRole, protectSuperAdmin, AuthRequest } from '../middleware/auth.js';
-import { upload } from '../middleware/upload.js';
+import { handleUploadError, singleUpload } from '../middleware/upload.js';
 
 const router = express.Router();
 
@@ -267,11 +267,21 @@ router.put('/reactions',
     }
 });
 
+const uploadAdminRoomAvatar = singleUpload('avatar');
+
 // Upload room avatar (admin only)
 router.post('/rooms/:roomId/avatar',
   authenticate,
   requireRole('admin'),
-  upload.single('avatar'),
+  (req: AuthRequest, res, next) => {
+    uploadAdminRoomAvatar(req, res, (error: unknown) => {
+      if (error) {
+        return handleUploadError(res, error);
+      }
+
+      next();
+    });
+  },
   async (req: AuthRequest, res) => {
     try {
       if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -287,6 +297,7 @@ router.post('/rooms/:roomId/avatar',
       await room.save();
       res.json({ avatar: avatarUrl });
     } catch (error) {
+      console.error('Admin room avatar upload failed:', error);
       res.status(500).json({ error: 'Failed to upload room avatar' });
     }
 });

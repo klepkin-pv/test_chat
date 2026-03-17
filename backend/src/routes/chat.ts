@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { NextFunction, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import path from 'path';
 import fs from 'fs';
@@ -7,9 +7,71 @@ import { Message } from '../models/Message.js';
 import { User } from '../models/User.js';
 import { Ban } from '../models/Ban.js';
 import { authenticate, AuthRequest } from '../middleware/auth.js';
-import { upload } from '../middleware/upload.js';
+import { handleUploadError, saveImageDataUrl, singleUpload } from '../middleware/upload.js';
 
 const router = express.Router();
+const uploadRoomAvatar = singleUpload('avatar');
+
+function parseBooleanInput(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+  }
+
+  return undefined;
+}
+
+function runRoomAvatarUpload(req: AuthRequest, res: Response, next: NextFunction) {
+  if (!req.is('multipart/form-data')) {
+    next();
+    return;
+  }
+
+  uploadRoomAvatar(req, res, (error: unknown) => {
+    if (error) {
+      handleUploadError(res, error);
+      return;
+    }
+
+    next();
+  });
+}
+
+function getRoomEditPermissions(room: any, user?: AuthRequest['user']) {
+  const isOwner = room.owner.toString() === user?.id;
+  const isRoomAdmin = room.admins.some((admin: any) => admin.toString() === user?.id);
+  const isGlobalAdmin = user?.role === 'admin';
+
+  return {
+    isOwner,
+    isRoomAdmin,
+    isGlobalAdmin,
+    allowed: isOwner || isRoomAdmin || isGlobalAdmin,
+  };
+}
+
+function replaceRoomAvatar(room: any, file?: Express.Multer.File, avatarDataUrl?: string) {
+  if (!file && !avatarDataUrl) {
+    return room.avatar;
+  }
+
+  if (room.avatar) {
+    const oldPath = path.join(process.cwd(), 'uploads', 'images', path.basename(room.avatar));
+    if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+  }
+
+  const avatarUrl = file
+    ? `/uploads/images/${file.filename}`
+    : saveImageDataUrl(avatarDataUrl!);
+  room.avatar = avatarUrl;
+
+  return avatarUrl;
+}
 
 // Get all rooms (показываем все комнаты, но пользователь может писать только в тех, где он участник)
 router.get('/rooms', async (req, res) => {
@@ -180,13 +242,11 @@ router.post('/search', async (req, res) => {
 });
 
 // Update room (только админы комнаты или owner)
-router.put('/rooms/:roomId', authenticate, async (req: AuthRequest, res) => {
+router.put('/rooms/:roomId', authenticate, runRoomAvatarUpload, async (req: AuthRequest, res) => {
   try {
     const { roomId } = req.params;
-    const { name, description, isPrivate, password } = req.body;
-    
-    console.log('PUT /rooms/:roomId - User:', req.user);
-    console.log('PUT /rooms/:roomId - Body:', { name, description });
+    const { name, description, isPrivate, password, avatarDataUrl } = req.body;
+    const parsedIsPrivate = parseBooleanInput(isPrivate);
     
     const room = await Room.findById(roomId);
     if (!room) {
@@ -194,21 +254,18 @@ router.put('/rooms/:roomId', authenticate, async (req: AuthRequest, res) => {
     }
 
     // Проверка прав (owner или admin комнаты или глобальный админ)
-    const isOwner = room.owner.toString() === req.user?.id;
-    const isRoomAdmin = room.admins.some((admin: any) => admin.toString() === req.user?.id);
-    const isGlobalAdmin = req.user?.role === 'admin';
+    const permissions = getRoomEditPermissions(room, req.user);
 
-    console.log('PUT /rooms/:roomId - Permissions:', { isOwner, isRoomAdmin, isGlobalAdmin });
-
-    if (!isOwner && !isRoomAdmin && !isGlobalAdmin) {
+    if (!permissions.allowed) {
       return res.status(403).json({ error: 'Only room admins can edit this room' });
     }
 
     if (name) room.name = name;
     if (description !== undefined) room.description = description;
-    if (isPrivate !== undefined) room.isPrivate = !!isPrivate;
-    if (isPrivate && password) room.password = await bcrypt.hash(password, 10);
-    if (isPrivate === false) room.password = null;
+    if (parsedIsPrivate !== undefined) room.isPrivate = parsedIsPrivate;
+    if (room.isPrivate && password) room.password = await bcrypt.hash(password, 10);
+    if (parsedIsPrivate === false) room.password = undefined;
+    replaceRoomAvatar(room, req.file, typeof avatarDataUrl === 'string' ? avatarDataUrl : undefined);
 
     await room.save();
     await room.populate('members', 'username displayName avatar isOnline role');
@@ -243,6 +300,11 @@ router.delete('/rooms/:roomId', authenticate, async (req: AuthRequest, res) => {
     await Room.findByIdAndDelete(roomId);
     // Также удаляем все сообщения комнаты
     await Message.deleteMany({ room: roomId });
+    // Удаляем аватарку комнаты с диска
+    if (room.avatar) {
+      const oldPath = path.join(process.cwd(), 'uploads', 'images', path.basename(room.avatar));
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    }
 
     res.json({ message: 'Room deleted successfully' });
   } catch (error) {
@@ -509,30 +571,30 @@ export const checkUserBan = async (userId: string, roomId: string): Promise<bool
 };
 
 // Upload room avatar (admin only)
-router.post('/rooms/:roomId/avatar', authenticate, upload.single('avatar'), async (req: AuthRequest, res) => {
+router.post('/rooms/:roomId/avatar', authenticate, (req: AuthRequest, res, next) => {
+  uploadRoomAvatar(req, res, (error: unknown) => {
+    if (error) {
+      return handleUploadError(res, error);
+    }
+
+    next();
+  });
+}, async (req: AuthRequest, res) => {
   try {
     const { roomId } = req.params;
     const room = await Room.findById(roomId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
-    const isAdmin = room.admins.some(a => a.toString() === req.user!.id) ||
-                    room.owner.toString() === req.user!.id ||
-                    req.user!.role === 'admin';
-    if (!isAdmin) return res.status(403).json({ error: 'Access denied' });
+    const permissions = getRoomEditPermissions(room, req.user);
+    if (!permissions.allowed) return res.status(403).json({ error: 'Access denied' });
 
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-    // Delete old avatar
-    if (room.avatar) {
-      const oldPath = path.join(process.cwd(), 'uploads', 'images', path.basename(room.avatar));
-      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-    }
-
-    const avatarUrl = `/uploads/images/${req.file.filename}`;
-    room.avatar = avatarUrl;
+    const avatarUrl = replaceRoomAvatar(room, req.file);
     await room.save();
     res.json({ avatar: avatarUrl });
   } catch (error) {
+    console.error('Room avatar upload failed:', error);
     res.status(500).json({ error: 'Failed to update room avatar' });
   }
 });

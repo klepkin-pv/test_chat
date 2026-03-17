@@ -1,12 +1,14 @@
 import mongoose from 'mongoose';
+import { getDefaultMongoUri } from './app.js';
+import { logger } from '../utils/logger.js';
 
 export const connectDB = async (): Promise<void> => {
   try {
-    const mongoURI = process.env.MONGODB_URI || 'mongodb://localhost:27018/chatreal';
+    const mongoURI = process.env.MONGODB_URI || getDefaultMongoUri();
     await mongoose.connect(mongoURI);
-    console.log('✅ MongoDB connected successfully');
+    logger.info('MongoDB connected successfully');
   } catch (error) {
-    console.error('❌ MongoDB connection error:', error);
+    logger.error('MongoDB connection error', error);
     throw error;
   }
 };

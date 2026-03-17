@@ -1,15 +1,17 @@
 import { createClient } from 'redis';
+import { getDefaultRedisUrl } from './app.js';
+import { logger } from '../utils/logger.js';
 
 export const redisClient = createClient({
-  url: process.env.REDIS_URL || 'redis://localhost:6380'
+  url: process.env.REDIS_URL || getDefaultRedisUrl()
 });
 
 export const connectRedis = async (): Promise<void> => {
   try {
     await redisClient.connect();
-    console.log('✅ Redis connected successfully');
+    logger.info('Redis connected successfully');
   } catch (error) {
-    console.error('❌ Redis connection error:', error);
+    logger.error('Redis connection error', error);
     throw error;
   }
 };

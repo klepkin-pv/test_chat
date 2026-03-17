@@ -1,9 +1,13 @@
 'use client'
 
-import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
-import { MessageCircle, Search, X } from 'lucide-react';
+import { useState, useEffect, forwardRef, useImperativeHandle, useCallback } from 'react';
+import { Users, Search, X } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
-import { getDirectApiUrl } from '@/utils/api';
+import { buildAvatarUrl, createAuthHeaders, fetchJson, getDirectApiUrl } from '@/utils/api';
+
+function getAvatarUrl(avatar?: string): string | null {
+  return buildAvatarUrl(avatar);
+}
 
 interface User {
   _id: string;
@@ -31,12 +35,26 @@ interface DirectMessagesProps {
 }
 
 const DirectMessages = forwardRef<any, DirectMessagesProps>(({ onSelectConversation, selectedUserId, socket }, ref) => {
-  const { user } = useAuthStore();
+  const { user, token } = useAuthStore();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [showUserSearch, setShowUserSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+
+  const loadConversations = useCallback(async () => {
+    try {
+      const data = await fetchJson<{ conversations?: Conversation[] }>(`${getDirectApiUrl()}/conversations`, {
+        headers: {
+          ...createAuthHeaders(token),
+          userid: user?.id || '',
+        }
+      });
+      setConversations(data.conversations || []);
+    } catch (error) {
+      console.error('Failed to load conversations:', error);
+    }
+  }, [token, user?.id]);
 
   // Expose methods to parent
   useImperativeHandle(ref, () => ({
@@ -68,14 +86,14 @@ const DirectMessages = forwardRef<any, DirectMessagesProps>(({ onSelectConversat
 
   useEffect(() => {
     loadConversations();
-  }, []);
+  }, [loadConversations]);
 
   useEffect(() => {
     // Обновляем список когда выбран новый пользователь
     if (selectedUserId) {
       loadConversations();
     }
-  }, [selectedUserId]);
+  }, [loadConversations, selectedUserId]);
 
   useEffect(() => {
     // Слушаем новые сообщения и обновляем список
@@ -90,28 +108,7 @@ const DirectMessages = forwardRef<any, DirectMessagesProps>(({ onSelectConversat
     return () => {
       socket.off('new_direct_message', handleNewDirectMessage);
     };
-  }, [socket]);
-
-  const loadConversations = async () => {
-    try {
-      const response = await fetch(`${getDirectApiUrl()}/conversations`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'userid': user?.id || ''
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Loaded conversations:', data.conversations);
-        setConversations(data.conversations || []);
-      } else {
-        console.error('Failed to load conversations:', response.status);
-      }
-    } catch (error) {
-      console.error('Failed to load conversations:', error);
-    }
-  };
+  }, [loadConversations, socket]);
 
   const searchUsers = async (query: string) => {
     if (!query.trim() || query.length < 2) {
@@ -121,17 +118,13 @@ const DirectMessages = forwardRef<any, DirectMessagesProps>(({ onSelectConversat
 
     setIsLoading(true);
     try {
-      const response = await fetch(`${getDirectApiUrl()}/users/search?q=${encodeURIComponent(query)}`, {
+      const data = await fetchJson<{ users: User[] }>(`${getDirectApiUrl()}/users/search?q=${encodeURIComponent(query)}`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'userid': user?.id || ''
+          ...createAuthHeaders(token),
+          userid: user?.id || ''
         }
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        setSearchResults(data.users);
-      }
+      setSearchResults(data.users);
     } catch (error) {
       console.error('Failed to search users:', error);
     } finally {
@@ -198,7 +191,7 @@ const DirectMessages = forwardRef<any, DirectMessagesProps>(({ onSelectConversat
       <div className="flex-1 overflow-y-auto chat-scrollbar">
         {conversations.length === 0 ? (
           <div className="p-4 text-center text-gray-500 dark:text-gray-400">
-            <MessageCircle size={48} className="mx-auto mb-4 opacity-50" />
+          <Users size={48} className="mx-auto mb-4 opacity-50" />
             <p>Нет сообщений</p>
             <p className="text-sm">Начните новый разговор</p>
           </div>
@@ -216,8 +209,11 @@ const DirectMessages = forwardRef<any, DirectMessagesProps>(({ onSelectConversat
               >
                 <div className="flex items-center space-x-3">
                   <div className="relative">
-                    <div className="w-12 h-12 bg-indigo-500 rounded-full flex items-center justify-center text-white font-semibold">
-                      {conversation.user.username[0].toUpperCase()}
+                    <div className="w-12 h-12 bg-indigo-500 rounded-full flex items-center justify-center text-white font-semibold overflow-hidden">
+                      {getAvatarUrl(conversation.user.avatar)
+                        ? <img src={getAvatarUrl(conversation.user.avatar)!} alt="avatar" className="w-full h-full object-cover" />
+                        : conversation.user.username[0].toUpperCase()
+                      }
                     </div>
                     {conversation.user.isOnline && (
                       <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white dark:border-gray-800"></div>
@@ -304,8 +300,11 @@ const DirectMessages = forwardRef<any, DirectMessagesProps>(({ onSelectConversat
                     >
                       <div className="flex items-center space-x-3">
                         <div className="relative">
-                          <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center text-white font-semibold">
-                            {searchUser.username[0].toUpperCase()}
+                          <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center text-white font-semibold overflow-hidden">
+                            {getAvatarUrl(searchUser.avatar)
+                              ? <img src={getAvatarUrl(searchUser.avatar)!} alt="avatar" className="w-full h-full object-cover" />
+                              : searchUser.username[0].toUpperCase()
+                            }
                           </div>
                           {searchUser.isOnline && (
                             <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white dark:border-gray-800"></div>

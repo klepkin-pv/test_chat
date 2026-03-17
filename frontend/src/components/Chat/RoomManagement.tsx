@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { Crown, Shield, Ban, Clock, X, AlertTriangle } from 'lucide-react';
 import { useChatStore } from '@/store/chatStore';
 import { useAuthStore } from '@/store/authStore';
+import { API_URL, createAuthHeaders, fetchJson } from '@/utils/api';
 
 interface User {
   _id: string;
@@ -27,7 +28,7 @@ interface RoomManagementProps {
 
 export default function RoomManagement({ onClose }: RoomManagementProps) {
   const { currentRoom } = useChatStore();
-  const { user } = useAuthStore();
+  const { user, token } = useAuthStore();
   const [activeTab, setActiveTab] = useState<'members' | 'bans'>('members');
   const [members, setMembers] = useState<User[]>([]);
   const [bans, setBans] = useState<Ban[]>([]);
@@ -45,61 +46,49 @@ export default function RoomManagement({ onClose }: RoomManagementProps) {
                   currentRoom?.owner?._id === user?.id;
   const isOwner = currentRoom?.owner?._id === user?.id;
 
+  const loadMembers = useCallback(async () => {
+    if (!currentRoom) return;
+    
+    try {
+      const data = await fetchJson<{ members: User[] }>(`${API_URL}/rooms/${currentRoom._id}/members`, {
+        headers: createAuthHeaders(token),
+      });
+      setMembers(data.members);
+    } catch (error) {
+      console.error('Failed to load members:', error);
+    }
+  }, [currentRoom, token]);
+
+  const loadBans = useCallback(async () => {
+    if (!currentRoom) return;
+    
+    try {
+      const data = await fetchJson<{ bans: Ban[] }>(`${API_URL}/rooms/${currentRoom._id}/bans`, {
+        headers: createAuthHeaders(token),
+      });
+      setBans(data.bans);
+    } catch (error) {
+      console.error('Failed to load bans:', error);
+    }
+  }, [currentRoom, token]);
+
   useEffect(() => {
     if (currentRoom) {
       loadMembers();
       loadBans();
     }
-  }, [currentRoom]);
-
-  const loadMembers = async () => {
-    if (!currentRoom) return;
-    
-    try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/chat/rooms/${currentRoom._id}/members`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setMembers(data.members);
-      }
-    } catch (error) {
-      console.error('Failed to load members:', error);
-    }
-  };
-
-  const loadBans = async () => {
-    if (!currentRoom) return;
-    
-    try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/chat/rooms/${currentRoom._id}/bans`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setBans(data.bans);
-      }
-    } catch (error) {
-      console.error('Failed to load bans:', error);
-    }
-  };
+  }, [currentRoom, loadBans, loadMembers]);
 
   const handleRoleChange = async (userId: string, action: 'promote' | 'demote') => {
     if (!currentRoom || !isOwner) return;
 
     setIsLoading(true);
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/chat/rooms/${currentRoom._id}/roles`, {
+      const response = await fetch(`${API_URL}/rooms/${currentRoom._id}/roles`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          ...createAuthHeaders(token)
         },
         body: JSON.stringify({ userId, action })
       });
@@ -127,11 +116,11 @@ export default function RoomManagement({ onClose }: RoomManagementProps) {
         expiresAt = new Date(Date.now() + duration * multiplier * 60 * 60 * 1000).toISOString();
       }
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/chat/rooms/${currentRoom._id}/ban`, {
+      const response = await fetch(`${API_URL}/rooms/${currentRoom._id}/ban`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          ...createAuthHeaders(token)
         },
         body: JSON.stringify({
           userId: selectedUser._id,
@@ -159,10 +148,10 @@ export default function RoomManagement({ onClose }: RoomManagementProps) {
 
     setIsLoading(true);
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/chat/bans/${banId}/unban`, {
+      const response = await fetch(`${API_URL}/bans/${banId}/unban`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          ...createAuthHeaders(token)
         }
       });
 

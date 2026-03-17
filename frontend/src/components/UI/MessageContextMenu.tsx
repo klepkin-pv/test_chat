@@ -37,6 +37,18 @@ export default function MessageContextMenu({
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
+    window.dispatchEvent(new CustomEvent('message-context-menu-toggle', {
+      detail: { messageId, isOpen }
+    }));
+
+    return () => {
+      window.dispatchEvent(new CustomEvent('message-context-menu-toggle', {
+        detail: { messageId, isOpen: false }
+      }));
+    };
+  }, [isOpen, messageId]);
+
+  useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         setIsOpen(false);

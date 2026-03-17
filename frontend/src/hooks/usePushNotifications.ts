@@ -82,7 +82,6 @@ export function usePushNotifications(token: string | null) {
     navigator.serviceWorker.getRegistrations().then(async (registrations) => {
       for (const reg of registrations) {
         if (!reg.scope.endsWith('/chat/') || reg.active?.scriptURL.includes('workbox')) {
-          console.log('[PWA] Removing old SW:', reg.scope, reg.active?.scriptURL);
           await reg.unregister();
         }
       }
@@ -91,7 +90,6 @@ export function usePushNotifications(token: string | null) {
     navigator.serviceWorker
       .register('/chat/sw.js', { scope: '/chat/' })
       .then(async (reg) => {
-        console.log('[PWA] SW registered, scope:', reg.scope);
         const sub = await reg.pushManager.getSubscription();
         setIsSubscribed(!!sub);
       })
@@ -103,7 +101,6 @@ export function usePushNotifications(token: string | null) {
 
   const subscribe = useCallback(async () => {
     setError(null);
-    console.log('[PWA] token:', token ? token.slice(0, 20) + '...' : 'NULL');
     if (!token) {
       setError('Нет токена авторизации');
       return;
@@ -117,14 +114,11 @@ export function usePushNotifications(token: string | null) {
         return;
       }
 
-      console.log('[PWA] Getting SW registration...');
       const reg = await swReady();
-      console.log('[PWA] SW ready, subscribing...');
 
       const keyRes = await fetch(`${getPushApiUrl()}/vapid-public-key`);
       if (!keyRes.ok) throw new Error(`VAPID key fetch failed: ${keyRes.status}`);
       const keyData = await keyRes.json();
-      console.log('[PWA] VAPID key response:', keyData);
       const publicKey = keyData.publicKey;
       if (!publicKey) throw new Error(`VAPID publicKey missing in response: ${JSON.stringify(keyData)}`);
 
@@ -132,9 +126,6 @@ export function usePushNotifications(token: string | null) {
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(publicKey)
       });
-      console.log('[PWA] PushManager subscribed');
-
-      console.log('[PWA] Saving subscription, token prefix:', token.slice(0, 15));
       const saveRes = await fetch(`${getPushApiUrl()}/subscribe`, {
         method: 'POST',
         headers: {
@@ -146,7 +137,6 @@ export function usePushNotifications(token: string | null) {
       if (!saveRes.ok) throw new Error(`Save subscription failed: ${saveRes.status}`);
 
       setIsSubscribed(true);
-      console.log('[PWA] Push subscription saved');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('[PWA] Push subscription failed:', msg);

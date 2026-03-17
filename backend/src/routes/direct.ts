@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { DirectMessage } from '../models/DirectMessage.js';
 import { User } from '../models/User.js';
 import { Block } from '../models/Block.js';
+import { logger } from '../utils/logger.js';
 
 const router = express.Router();
 
@@ -11,7 +12,6 @@ router.get('/conversations', async (req, res) => {
   try {
     const userId = req.headers.userid as string;
     const userObjectId = new mongoose.Types.ObjectId(userId);
-    console.log('GET /conversations - userId:', userId);
 
     // Сначала проверим есть ли вообще сообщения
     const allMessages = await DirectMessage.find({
@@ -20,14 +20,7 @@ router.get('/conversations', async (req, res) => {
         { recipient: userObjectId }
       ]
     }).limit(5);
-    console.log('Total messages found:', allMessages.length);
-    if (allMessages.length > 0) {
-      console.log('Sample message:', {
-        sender: allMessages[0].sender,
-        recipient: allMessages[0].recipient,
-        content: allMessages[0].content.substring(0, 20)
-      });
-    }
+    logger.debug('Loaded direct message sample set', { userId, totalMessages: allMessages.length });
 
     // Get all users who have exchanged messages with current user
     const conversations = await DirectMessage.aggregate([
@@ -96,7 +89,7 @@ router.get('/conversations', async (req, res) => {
       }
     ]);
 
-    console.log('Found conversations:', conversations.length);
+    logger.debug('Found direct conversations', { userId, count: conversations.length });
     res.json({ conversations });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch conversations' });
@@ -141,7 +134,7 @@ router.post('/conversations', async (req, res) => {
       participant 
     });
   } catch (error) {
-    console.error('Error creating conversation:', error);
+    logger.error('Error creating conversation', error);
     res.status(500).json({ error: 'Failed to create conversation' });
   }
 });

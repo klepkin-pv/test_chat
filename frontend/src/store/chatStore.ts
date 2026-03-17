@@ -30,6 +30,7 @@ interface Room {
   _id: string;
   name: string;
   description?: string;
+  avatar?: string;
   isPrivate?: boolean;
   members: Array<{
     _id: string;
@@ -169,15 +170,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
           body: JSON.stringify({ password })
         });
         
-        console.log('Join room response:', response.status);
-        
         if (!response.ok) {
           const error = await response.json();
           console.error('Failed to join room:', error);
           return { requiresPassword: error.requiresPassword, error: error.error };
         }
-        
-        console.log('Successfully joined room via HTTP');
       } catch (error) {
         console.error('Error joining room:', error);
         return { error: 'Network error' };
@@ -262,7 +259,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  setRooms: (rooms) => set({ rooms }),
+  setRooms: (rooms) => set((state) => ({
+    rooms,
+    currentRoom: state.currentRoom
+      ? rooms.find(room => room._id === state.currentRoom?._id) || state.currentRoom
+      : null
+  })),
 
   addMessage: (message) => {
     set(state => ({

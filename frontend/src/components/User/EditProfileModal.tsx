@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react';
 import { X, Save, Camera } from 'lucide-react';
-import { getAuthApiUrl } from '@/utils/api';
+import { getAuthApiUrl, buildAvatarUrl } from '@/utils/api';
 import { useAuthStore } from '@/store/authStore';
 
 interface EditProfileModalProps {
@@ -30,11 +30,7 @@ export default function EditProfileModal({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { token, updateUser } = useAuthStore();
 
-  const getAvatarUrl = (url?: string) => {
-    if (!url) return null;
-    if (url.startsWith('http')) return url;
-    return `${getAuthApiUrl().replace('/auth', '')}${url}`;
-  };
+  const getAvatarUrl = (url?: string) => buildAvatarUrl(url);
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -68,10 +64,13 @@ export default function EditProfileModal({
           headers: { 'Authorization': `Bearer ${token}` },
           body: formData
         });
-        if (avatarRes.ok) {
-          const data = await avatarRes.json();
-          newAvatar = data.avatar;
+        if (!avatarRes.ok) {
+          const avatarError = await avatarRes.json().catch(() => null);
+          throw new Error(avatarError?.error || 'Не удалось загрузить аватар');
         }
+
+        const data = await avatarRes.json();
+        newAvatar = data.avatar;
       }
 
       // Update profile

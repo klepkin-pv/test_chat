@@ -7,6 +7,7 @@ import { Block } from '../models/Block.js';
 import { redisClient } from '../config/redis.js';
 import { checkUserBan } from '../routes/chat.js';
 import { sendPushToUser } from '../utils/webPush.js';
+import { logger } from '../utils/logger.js';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -15,7 +16,7 @@ interface AuthenticatedSocket extends Socket {
 
 export const setupSocketHandlers = (io: Server) => {
   io.on('connection', (socket: AuthenticatedSocket) => {
-    console.log(`User connected: ${socket.id}`);
+    logger.debug('Socket connected', { socketId: socket.id });
 
     // Authentication
     socket.on('authenticate', async (data: { userId: string, username: string }) => {
@@ -33,7 +34,7 @@ export const setupSocketHandlers = (io: Server) => {
         await redisClient.set(`user:${data.userId}`, socket.id);
         
         socket.emit('authenticated', { success: true });
-        console.log(`User authenticated: ${data.username}`);
+        logger.debug('Socket authenticated', { socketId: socket.id, userId: data.userId, username: data.username });
       } catch (error) {
         socket.emit('authenticated', { success: false, error: 'Authentication failed' });
       }
@@ -294,7 +295,7 @@ export const setupSocketHandlers = (io: Server) => {
 
     // Disconnect handler
     socket.on('disconnect', async () => {
-      console.log(`User disconnected: ${socket.id}`);
+      logger.debug('Socket disconnected', { socketId: socket.id, userId: socket.userId });
       
       if (socket.userId) {
         // Update user offline status
@@ -368,7 +369,11 @@ export const setupSocketHandlers = (io: Server) => {
         await message.populate('sender', 'username avatar');
         await message.populate('recipient', 'username avatar');
 
-        console.log('Direct message saved:', message._id, 'from:', socket.userId, 'to:', data.recipientId);
+        logger.debug('Direct message saved', {
+          messageId: message._id.toString(),
+          senderId: socket.userId,
+          recipientId: data.recipientId,
+        });
 
         // Send to sender
         socket.emit('new_direct_message', message);
@@ -382,7 +387,12 @@ export const setupSocketHandlers = (io: Server) => {
         // Send push unless recipient has THIS dialog open right now
         const recipientOpenDm = await redisClient.get(`dm_open:${data.recipientId}`);
         const isViewingThisDialog = recipientOpenDm === socket.userId;
-        console.log(`[push] recipientId=${data.recipientId}, dm_open=${recipientOpenDm}, senderId=${socket.userId}, willSendPush=${!isViewingThisDialog}`);
+        logger.debug('Evaluated direct-message push delivery', {
+          recipientId: data.recipientId,
+          dmOpen: recipientOpenDm,
+          senderId: socket.userId,
+          willSendPush: !isViewingThisDialog,
+        });
         if (!isViewingThisDialog) {
           const preview = data.content.length > 80 ? data.content.slice(0, 80) + '…' : data.content;
           await sendPushToUser(data.recipientId, {

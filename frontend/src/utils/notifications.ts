@@ -153,11 +153,11 @@ export class NotificationManager {
   }
 
   // Clear all notifications with specific tag
-  clearNotifications(tag?: string) {
+  clearNotifications(_tag?: string) {
     if (typeof window === 'undefined') return;
     // Note: There's no standard way to clear notifications programmatically
     // This is a placeholder for future implementation
-    console.log(`Clearing notifications${tag ? ` with tag: ${tag}` : ''}`);
+    void _tag;
   }
 }
 

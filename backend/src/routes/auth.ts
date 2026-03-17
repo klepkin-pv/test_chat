@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import path from 'path';
 import fs from 'fs';
 import { User } from '../models/User.js';
-import { upload } from '../middleware/upload.js';
+import { handleUploadError, singleUpload } from '../middleware/upload.js';
 
 const router = express.Router();
 
@@ -219,8 +219,18 @@ router.get('/users/:userId', authenticateToken, async (req: any, res) => {
   }
 });
 
+const uploadAvatar = singleUpload('avatar');
+
 // Upload user avatar
-router.post('/avatar', authenticateToken, upload.single('avatar'), async (req: any, res) => {
+router.post('/avatar', authenticateToken, (req: any, res, next) => {
+  uploadAvatar(req, res, (error: unknown) => {
+    if (error) {
+      return handleUploadError(res, error);
+    }
+
+    next();
+  });
+}, async (req: any, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -236,7 +246,33 @@ router.post('/avatar', authenticateToken, upload.single('avatar'), async (req: a
     await user.save();
     res.json({ avatar: avatarUrl });
   } catch (error) {
+    console.error('Avatar upload failed:', error);
     res.status(500).json({ error: 'Failed to upload avatar' });
+  }
+});
+
+// Refresh token — выдаёт новый токен если старый ещё валиден
+router.post('/refresh', authenticateToken, async (req: any, res) => {
+  try {
+    const user = req.user;
+    const token = jwt.sign(
+      { userId: user._id, username: user.username },
+      process.env.JWT_SECRET || 'secret_base_for_dev',
+      { expiresIn: '7d' }
+    );
+    res.json({
+      token,
+      user: {
+        id: user._id,
+        username: user.username,
+        displayName: user.displayName,
+        email: user.email,
+        avatar: user.avatar,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
   }
 });
 

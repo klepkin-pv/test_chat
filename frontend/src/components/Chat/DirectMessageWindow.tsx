@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Paperclip, MoreVertical, X, Check, Reply, Menu } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { soundManager } from '@/utils/sounds';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useWindowFocus } from '@/hooks/useWindowFocus';
-import { getDirectApiUrl } from '@/utils/api';
+import { buildAvatarUrl, createAuthHeaders, fetchJson, getDirectApiUrl } from '@/utils/api';
 import EmojiPicker from '@/components/UI/EmojiPicker';
 import FileUpload from '@/components/UI/FileUpload';
 import FileMessage from '@/components/UI/FileMessage';
@@ -64,8 +64,9 @@ interface DirectMessageWindowProps {
 }
 
 export default function DirectMessageWindow({ recipientId, recipientInfo, socket, onToggleSidebar, onMessageSent, onOpenDirectMessage }: DirectMessageWindowProps) {
-  const { user } = useAuthStore();
+  const { user, token } = useAuthStore();
   const [messages, setMessages] = useState<DirectMessage[]>([]);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
   const [recipient, setRecipient] = useState<User | null>(null);
   const [messageText, setMessageText] = useState('');
@@ -75,6 +76,7 @@ export default function DirectMessageWindow({ recipientId, recipientInfo, socket
   const [editingText, setEditingText] = useState('');
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const currentUserId = user?.id || '';
 
   const isWindowFocused = useWindowFocus();
   const { showDirectMessageNotification } = useNotifications({
@@ -86,7 +88,7 @@ export default function DirectMessageWindow({ recipientId, recipientInfo, socket
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const markMessagesAsRead = () => {
+  const markMessagesAsRead = useCallback(() => {
     if (socket && recipientId) {
       socket.emit('mark_direct_messages_read', { senderId: recipientId });
       // Close any push notification for this DM conversation
@@ -96,40 +98,37 @@ export default function DirectMessageWindow({ recipientId, recipientInfo, socket
         });
       }
     }
-  };
+  }, [recipientId, socket]);
 
-  const loadMessages = async () => {
+  const loadMessages = useCallback(async () => {
     try {
-      const response = await fetch(`${getDirectApiUrl()}/messages/${recipientId}`, {
+      const data = await fetchJson<{ messages: DirectMessage[] }>(`${getDirectApiUrl()}/messages/${recipientId}`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'userid': user?.id || ''
+          ...createAuthHeaders(token),
+          userid: currentUserId
         }
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        setMessages(data.messages);
-        
-        if (data.messages.length > 0) {
-          const firstMessage = data.messages[0];
-          const recipientInfo = firstMessage.sender._id === user?.id 
-            ? firstMessage.recipient 
-            : firstMessage.sender;
-          setRecipient(recipientInfo);
-        }
+      setMessages(data.messages);
+      
+      if (data.messages.length > 0) {
+        const firstMessage = data.messages[0];
+        const resolvedRecipient = firstMessage.sender._id === currentUserId 
+          ? firstMessage.recipient 
+          : firstMessage.sender;
+        setRecipient(prev => ({ ...resolvedRecipient, isOnline: prev?.isOnline ?? false }));
       }
     } catch (error) {
       console.error('Failed to load messages:', error);
     }
-  };
+  }, [currentUserId, recipientId, token]);
 
   useEffect(() => {
     if (recipientId) {
       loadMessages();
       markMessagesAsRead();
     }
-  }, [recipientId]);
+  }, [loadMessages, markMessagesAsRead, recipientId]);
 
   // Tell backend this dialog is open so push is suppressed
   useEffect(() => {
@@ -228,7 +227,7 @@ export default function DirectMessageWindow({ recipientId, recipientInfo, socket
       socket.off('direct_reaction_removed', handleDirectReactionRemoved);
       socket.off('direct_messages_read', handleDirectMessagesRead);
     };
-  }, [socket, recipientId, user?.id]);
+  }, [socket, recipientId, user?.id, isWindowFocused, markMessagesAsRead, onMessageSent, showDirectMessageNotification]);
 
   useEffect(() => {
     scrollToBottom();
@@ -342,6 +341,19 @@ export default function DirectMessageWindow({ recipientId, recipientInfo, socket
     });
   };
 
+  const jumpToMessage = (messageId: string) => {
+    setHighlightedMessageId(messageId);
+
+    const messageElement = document.getElementById(`message-${messageId}`);
+    if (messageElement) {
+      messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    setTimeout(() => {
+      setHighlightedMessageId((current) => current === messageId ? null : current);
+    }, 3000);
+  };
+
   if (!recipient) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-gray-50 dark:bg-gray-900">
@@ -373,8 +385,11 @@ export default function DirectMessageWindow({ recipientId, recipientInfo, socket
               </button>
             )}
             <div className="relative">
-              <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center text-white font-semibold">
-                {recipient.username[0].toUpperCase()}
+              <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center text-white font-semibold overflow-hidden">
+                {buildAvatarUrl(recipient.avatar)
+                  ? <img src={buildAvatarUrl(recipient.avatar)!} alt="avatar" className="w-full h-full object-cover" />
+                  : recipient.username[0].toUpperCase()
+                }
               </div>
               {recipient.isOnline && (
                 <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white dark:border-gray-800"></div>
@@ -407,15 +422,20 @@ export default function DirectMessageWindow({ recipientId, recipientInfo, socket
         {messages.map((message, index) => (
           <div
             key={message._id}
+            id={`message-${message._id}`}
             className={`flex message-appear group ${
               message.sender._id === user?.id ? 'justify-end' : 'justify-start'
-            }`}
+            } ${highlightedMessageId === message._id ? 'bg-yellow-100 dark:bg-yellow-900/20 rounded-lg p-2 -m-2' : ''}`}
             style={{ animationDelay: `${index * 0.05}s` }}
           >
             <div className="flex flex-col max-w-xs lg:max-w-md relative group">
               {/* Reply indicator */}
               {message.replyTo && (
-                <div className="mb-1 px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded text-xs text-gray-600 dark:text-gray-400 border-l-2 border-indigo-500">
+                <button
+                  type="button"
+                  onClick={() => jumpToMessage(message.replyTo!)}
+                  className="mb-1 w-full rounded border-l-2 border-indigo-500 bg-gray-100 px-2 py-1 text-left text-xs text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600"
+                >
                   <div className="flex items-center space-x-1">
                     <Reply size={12} />
                     <span>Ответ на:</span>
@@ -430,7 +450,7 @@ export default function DirectMessageWindow({ recipientId, recipientInfo, socket
                       <p className="italic">Сообщение удалено</p>
                     );
                   })()}
-                </div>
+                </button>
               )}
 
               <MessageActions
@@ -460,7 +480,7 @@ export default function DirectMessageWindow({ recipientId, recipientInfo, socket
                   className={`relative transition-all hover-lift ${
                     message.sender._id === user?.id
                       ? 'bg-indigo-500 text-white rounded-lg'
-                      : 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg shadow-sm'
+                      : 'bg-gray-100 border border-gray-200 text-gray-900 rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-white shadow-sm'
                   } ${(message.reactions?.length > 0 && editingMessageId !== message._id) ? 'pb-3' : ''}`}
                 >                  {editingMessageId === message._id ? (
                     <div className="p-4">

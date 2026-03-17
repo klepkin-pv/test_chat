@@ -1,13 +1,16 @@
 {
   "name": "ChatReal",
+  "id": "/chat/",
   "short_name": "ChatReal",
   "description": "Real-time chat application",
-  "start_url": "/chat",
-  "scope": "/chat",
+  "start_url": "/chat/",
+  "scope": "/chat/",
   "display": "standalone",
+  "display_override": ["standalone", "browser"],
   "orientation": "portrait",
   "background_color": "#0f172a",
   "theme_color": "#6366f1",
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "/chat/icons/icon-192.png",

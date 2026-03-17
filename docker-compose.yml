@@ -1,13 +1,12 @@
 version: '3.8'
 
 services:
-  # MongoDB
   mongodb:
     image: mongo:latest
     container_name: chatreal_mongodb
     restart: unless-stopped
     ports:
-      - "27018:27017"
+      - "${MONGODB_PORT:-27018}:27017"
     environment:
       MONGO_INITDB_DATABASE: chatreal
     volumes:
@@ -15,19 +14,17 @@ services:
     networks:
       - chatreal_network
 
-  # Redis
   redis:
     image: redis:latest
     container_name: chatreal_redis
     restart: unless-stopped
     ports:
-      - "6380:6379"
+      - "${REDIS_PORT:-6380}:6379"
     volumes:
       - ./data/redis:/data
     networks:
       - chatreal_network
 
-  # Backend
   backend:
     build:
       context: .
@@ -35,13 +32,20 @@ services:
     container_name: chatreal_backend
     restart: unless-stopped
     ports:
-      - "4000:4000"
+      - "${PORT:-4000}:${PORT:-4000}"
     environment:
       - NODE_ENV=development
-      - PORT=4000
-      - MONGODB_URI=mongodb://mongodb:27017/chatreal
-      - REDIS_URL=redis://redis:6379
-      - CLIENT_URL=http://localhost:3000
+      - APP_PROTOCOL=${APP_PROTOCOL:-http}
+      - APP_HOST=${APP_HOST:-localhost}
+      - PUBLIC_ORIGIN=${PUBLIC_ORIGIN:-http://localhost:5175}
+      - NGINX_PORT=${NGINX_PORT:-5175}
+      - FRONTEND_PORT=${FRONTEND_PORT:-5176}
+      - PORT=${PORT:-4000}
+      - MONGODB_PORT=${MONGODB_PORT:-27018}
+      - REDIS_PORT=${REDIS_PORT:-6380}
+      - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/chatreal}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - CLIENT_URL=${CLIENT_URL:-http://localhost:5175}
       - JWT_SECRET=${JWT_SECRET}
     depends_on:
       - mongodb
@@ -53,7 +57,6 @@ services:
     networks:
       - chatreal_network
 
-  # Frontend
   frontend:
     build:
       context: .
@@ -61,11 +64,16 @@ services:
     container_name: chatreal_frontend
     restart: unless-stopped
     ports:
-      - "5176:5176"
+      - "${FRONTEND_PORT:-5176}:${FRONTEND_PORT:-5176}"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:5175/api/chat
-      - NEXT_PUBLIC_SOCKET_URL=http://localhost:5175
-      - PORT=5176
+      - APP_PROTOCOL=${APP_PROTOCOL:-http}
+      - APP_HOST=${APP_HOST:-localhost}
+      - PUBLIC_ORIGIN=${PUBLIC_ORIGIN:-http://localhost:5175}
+      - NGINX_PORT=${NGINX_PORT:-5175}
+      - FRONTEND_PORT=${FRONTEND_PORT:-5176}
+      - PORT=${PORT:-4000}
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:5175/api/chat}
+      - NEXT_PUBLIC_SOCKET_URL=${NEXT_PUBLIC_SOCKET_URL:-http://localhost:5175}
     depends_on:
       - backend
     volumes:
@@ -74,10 +82,6 @@ services:
       - /app/.next
     networks:
       - chatreal_network
-
-volumes:
-  mongodb_data:
-  redis_data:
 
 networks:
   chatreal_network:

@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react';
 import { X, Save, Lock, Camera } from 'lucide-react';
-import { getChatApiUrl, getAuthApiUrl } from '@/utils/api';
+import { getChatApiUrl, buildAvatarUrl } from '@/utils/api';
 import { useAuthStore } from '@/store/authStore';
 
 interface EditRoomModalProps {
@@ -30,19 +30,52 @@ export default function EditRoomModal({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { token } = useAuthStore();
 
-  const getDisplayAvatar = (url?: string) => {
-    if (!url) return null;
-    if (url.startsWith('http')) return url;
-    return `${getAuthApiUrl().replace('/auth', '')}${url}`;
-  };
+  const getDisplayAvatar = (url?: string) => buildAvatarUrl(url);
 
-  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const prepareAvatarDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Не удалось прочитать файл'));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error('Не удалось обработать изображение'));
+      image.onload = () => {
+        const maxSide = 512;
+        const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+        const width = Math.max(1, Math.round(image.width * scale));
+        const height = Math.max(1, Math.round(image.height * scale));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+
+        const context = canvas.getContext('2d');
+        if (!context) {
+          reject(new Error('Не удалось подготовить изображение'));
+          return;
+        }
+
+        context.drawImage(image, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/webp', 0.85));
+      };
+      image.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setAvatarFile(file);
-    const reader = new FileReader();
-    reader.onload = (ev) => setAvatarPreview(ev.target?.result as string);
-    reader.readAsDataURL(file);
+    setError('');
+
+    try {
+      const preparedAvatar = await prepareAvatarDataUrl(file);
+      setAvatarFile(file);
+      setAvatarPreview(preparedAvatar);
+    } catch (avatarError) {
+      setAvatarFile(null);
+      setAvatarPreview(null);
+      setError(avatarError instanceof Error ? avatarError.message : 'Не удалось подготовить аватарку');
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -54,19 +87,16 @@ export default function EditRoomModal({
     setError('');
 
     try {
-      if (avatarFile) {
-        const formData = new FormData();
-        formData.append('avatar', avatarFile);
-        await fetch(`${getChatApiUrl()}/rooms/${roomId}/avatar`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}` },
-          body: formData
-        });
-      }
-
       const body: any = { name: name.trim(), description: description.trim(), isPrivate };
       if (isPrivate && changePassword && password) body.password = password;
       if (!isPrivate) body.isPrivate = false;
+      if (avatarFile) {
+        if (!avatarPreview) {
+          setError('Аватарка еще не подготовилась, попробуйте снова');
+          return;
+        }
+        body.avatarDataUrl = avatarPreview;
+      }
 
       const response = await fetch(`${getChatApiUrl()}/rooms/${roomId}`, {
         method: 'PUT',

@@ -1,21 +1,22 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Chat Real - Чат в реальном времени',
-  description: 'Современное чат-приложение с WebSocket соединениями',
+  title: 'Chat Real - Р§Р°С‚ РІ СЂРµР°Р»СЊРЅРѕРј РІСЂРµРјРµРЅРё',
+  description: 'РЎРѕРІСЂРµРјРµРЅРЅРѕРµ С‡Р°С‚-РїСЂРёР»РѕР¶РµРЅРёРµ СЃ WebSocket СЃРѕРµРґРёРЅРµРЅРёСЏРјРё',
   manifest: '/chat/manifest.json',
-  themeColor: '#6366f1',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
     title: 'ChatReal'
-  },
-  viewport: {
-    width: 'device-width',
-    initialScale: 1,
-    maximumScale: 1
   }
+}
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  themeColor: '#6366f1'
 }
 
 export default function RootLayout({

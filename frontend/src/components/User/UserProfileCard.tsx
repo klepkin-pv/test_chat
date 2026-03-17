@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { X, MessageCircle, Ban, Shield, UserX, DoorOpen, Edit, Heart } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
-import { getAdminApiUrl, getUserApiUrl, getAuthApiUrl } from '@/utils/api';
+import { getAdminApiUrl, getUserApiUrl, getAuthApiUrl, buildAvatarUrl } from '@/utils/api';
 import EditProfileModal from './EditProfileModal';
 
 interface UserProfileCardProps {
@@ -21,10 +21,8 @@ interface UserProfileCardProps {
   onOpenDirectMessage?: (userId: string) => void;
 }
 
-function getAvatarUrl(avatar?: string, baseUrl?: string): string | null {
-  if (!avatar) return null;
-  if (avatar.startsWith('http')) return avatar;
-  return `${(baseUrl || '').replace('/auth', '')}${avatar}`;
+function getAvatarUrl(avatar?: string): string | null {
+  return buildAvatarUrl(avatar);
 }
 
 export default function UserProfileCard({ user: initialUser, onClose, roomId, onOpenDirectMessage }: UserProfileCardProps) {
@@ -164,17 +162,23 @@ export default function UserProfileCard({ user: initialUser, onClose, roomId, on
   };
 
   const handleLogout = () => { logout(); onClose(); };
+  const handleClose = () => {
+    setShowAvatarFull(false);
+    setShowEditProfile(false);
+    setShowBanForm(false);
+    onClose();
+  };
 
   const avatarSrc = isSelf
-    ? getAvatarUrl(currentUser?.avatar, getAuthApiUrl())
-    : getAvatarUrl(user.avatar, getAuthApiUrl());
+    ? getAvatarUrl(currentUser?.avatar)
+    : getAvatarUrl(user.avatar);
 
   const displayedName = isSelf && currentUser?.displayName
     ? currentUser.displayName
     : (user.displayName || user.username);
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={handleClose}>
       <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}>
 
@@ -202,7 +206,7 @@ export default function UserProfileCard({ user: initialUser, onClose, roomId, on
               </span>
             </div>
           </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+          <button onClick={handleClose} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
             <X size={20} />
           </button>
         </div>

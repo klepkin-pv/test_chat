@@ -91,7 +91,6 @@ export const useNotifications = ({
   useEffect(() => {
     if (notificationManager.canRequest() && !notificationManager.isEnabled()) {
       // Don't auto-request, let user decide
-      console.log('Notifications available but not enabled');
     }
   }, []);
 

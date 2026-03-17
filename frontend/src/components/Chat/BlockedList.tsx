@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { Ban, Loader, UserX } from 'lucide-react';
-import { getUserApiUrl } from '@/utils/api';
+import { createAuthHeaders, fetchJson, getUserApiUrl } from '@/utils/api';
 import { useAuthStore } from '@/store/authStore';
 
 interface BlockedUser {
@@ -18,28 +18,22 @@ export default function BlockedList() {
   const [loading, setLoading] = useState(true);
   const { token } = useAuthStore();
 
-  useEffect(() => {
-    fetchBlocked();
-  }, []);
-
-  const fetchBlocked = async () => {
+  const fetchBlocked = useCallback(async () => {
     try {
-      const response = await fetch(`${getUserApiUrl()}/blocks`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+      const data = await fetchJson<{ blocks?: BlockedUser[] }>(`${getUserApiUrl()}/blocks`, {
+        headers: createAuthHeaders(token),
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        setBlocked(data.blocks || []);
-      }
+      setBlocked(data.blocks || []);
     } catch {
       console.error('Failed to fetch blocked users');
     } finally {
       setLoading(false);
     }
-  };
+  }, [token]);
+
+  useEffect(() => {
+    fetchBlocked();
+  }, [fetchBlocked]);
 
   const handleUnblock = async (userId: string) => {
     if (!window.confirm('Разблокировать этого пользователя?')) {

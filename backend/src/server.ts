@@ -3,9 +3,9 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import helmet from 'helmet';
-import dotenv from 'dotenv';
 import { connectDB } from './config/database.js';
 import { connectRedis } from './config/redis.js';
+import { getAllowedOrigins, getBackendPort } from './config/app.js';
 import { setupSocketHandlers } from './socket/handlers.js';
 import authRoutes from './routes/auth.js';
 import chatRoutes from './routes/chat.js';
@@ -14,33 +14,43 @@ import directRoutes from './routes/direct.js';
 import adminRoutes from './routes/admin.js';
 import favoritesRoutes from './routes/favorites.js';
 import pushRoutes from './routes/push.js';
-
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { errorHandler, notFoundHandler, requestContextMiddleware } from './middleware/errorHandler.js';
+import { logger } from './utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
-
 const app = express();
 const server = createServer(app);
 
+function isAllowedOrigin(origin?: string): boolean {
+  return !origin || getAllowedOrigins().includes(origin);
+}
+
 // Middleware
-app.use(helmet());
+app.use(requestContextMiddleware);
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: false
+}));
 app.use(cors({
-  origin: [
-    process.env.CLIENT_URL || "http://localhost:5175",
-    "https://worksource.share.zrok.io",
-    "http://localhost:5176"
-  ],
+  origin: (origin, callback) => {
+    if (isAllowedOrigin(origin)) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
   credentials: true
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
 // Static uploads
-app.use('/uploads', express.static(path.join(__dirname, '../../uploads')));
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Routes
 app.use('/auth', authRoutes);
@@ -50,16 +60,14 @@ app.use('/direct', directRoutes);
 app.use('/admin', adminRoutes);
 app.use('/user', favoritesRoutes);
 app.use('/push', pushRoutes);
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 // Socket.IO setup
 const io = new Server(server, {
   cors: {
-    origin: [
-      process.env.CLIENT_URL || "http://localhost:5175",
-      "https://worksource.share.zrok.io",
-      "http://localhost:5176"
-    ],
-    methods: ["GET", "POST"]
+    origin: getAllowedOrigins(),
+    methods: ['GET', 'POST']
   }
 });
 
@@ -68,17 +76,28 @@ async function startServer() {
   try {
     await connectDB();
     await connectRedis();
-    
+
     setupSocketHandlers(io);
-    
-    const PORT = process.env.PORT || 4000;
-    server.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
+
+    const backendPort = getBackendPort();
+    const allowedOrigins = getAllowedOrigins();
+
+    server.listen(backendPort, () => {
+      logger.info(`Server running on port ${backendPort}`);
+      logger.info(`Allowed origins: ${allowedOrigins.join(', ')}`);
     });
   } catch (error) {
-    console.error('Failed to start server:', error);
+    logger.error('Failed to start server', error);
     process.exit(1);
   }
 }
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled promise rejection', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught exception', error);
+});
 
 startServer();

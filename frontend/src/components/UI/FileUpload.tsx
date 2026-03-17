@@ -2,6 +2,7 @@
 
 import { useState, useRef } from 'react';
 import { Upload, X, File, Image, FileText, Archive } from 'lucide-react';
+import { FILES_API_URL } from '@/utils/api';
 
 interface UploadedFile {
   id: string;
@@ -18,14 +19,14 @@ interface FileUploadProps {
   onFilesUploaded: (files: UploadedFile[]) => void;
   onClose: () => void;
   maxFiles?: number;
-  maxSize?: number; // в байтах
+  maxSize?: number;
 }
 
-export default function FileUpload({ 
-  onFilesUploaded, 
-  onClose, 
-  maxFiles = 5, 
-  maxSize = 10 * 1024 * 1024 // 10MB
+export default function FileUpload({
+  onFilesUploaded,
+  onClose,
+  maxFiles = 5,
+  maxSize = 10 * 1024 * 1024
 }: FileUploadProps) {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -35,14 +36,12 @@ export default function FileUpload({
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
-    
-    // Проверяем количество файлов
+
     if (files.length > maxFiles) {
       setError(`Максимум ${maxFiles} файлов за раз`);
       return;
     }
 
-    // Проверяем размер файлов
     const oversizedFiles = files.filter(file => file.size > maxSize);
     if (oversizedFiles.length > 0) {
       setError(`Файлы слишком большие. Максимум ${formatFileSize(maxSize)}`);
@@ -56,7 +55,7 @@ export default function FileUpload({
   const handleDrop = (event: React.DragEvent) => {
     event.preventDefault();
     const files = Array.from(event.dataTransfer.files);
-    
+
     if (files.length > maxFiles) {
       setError(`Максимум ${maxFiles} файлов за раз`);
       return;
@@ -93,7 +92,7 @@ export default function FileUpload({
         formData.append('files', file);
       });
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/files/upload`, {
+      const response = await fetch(`${FILES_API_URL}/upload`, {
         method: 'POST',
         body: formData,
       });
@@ -107,8 +106,8 @@ export default function FileUpload({
       onFilesUploaded(result.files);
       onClose();
 
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'Ошибка загрузки файлов');
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : 'Ошибка загрузки файлов');
     } finally {
       setUploading(false);
       setUploadProgress(0);
@@ -137,10 +136,8 @@ export default function FileUpload({
 
   return (
     <>
-      {/* Backdrop */}
       <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full animate-bounce-in">
-          {/* Header */}
           <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
               Загрузить файлы
@@ -153,7 +150,6 @@ export default function FileUpload({
             </button>
           </div>
 
-          {/* Content */}
           <div className="p-4">
             {error && (
               <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 rounded-lg text-sm animate-fade-in">
@@ -161,7 +157,6 @@ export default function FileUpload({
               </div>
             )}
 
-            {/* Drop Zone */}
             <div
               onDrop={handleDrop}
               onDragOver={handleDragOver}
@@ -186,7 +181,6 @@ export default function FileUpload({
               accept="image/*,.pdf,.doc,.docx,.txt,.zip,.rar,.7z"
             />
 
-            {/* Selected Files */}
             {selectedFiles.length > 0 && (
               <div className="mt-4">
                 <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">
@@ -221,7 +215,6 @@ export default function FileUpload({
               </div>
             )}
 
-            {/* Upload Progress */}
             {uploading && (
               <div className="mt-4">
                 <div className="flex items-center justify-between mb-2">
@@ -238,7 +231,6 @@ export default function FileUpload({
             )}
           </div>
 
-          {/* Footer */}
           <div className="flex items-center justify-end space-x-2 p-4 border-t border-gray-200 dark:border-gray-700">
             <button
               onClick={onClose}

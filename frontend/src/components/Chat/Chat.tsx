@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useAuthStore } from '@/store/authStore';
 import { useChatStore } from '@/store/chatStore';
 import { usePageTitle } from '@/hooks/usePageTitle';
+import { useAuthGuard } from '@/hooks/useAuthGuard';
 import { getDirectApiUrl } from '@/utils/api';
 import Sidebar from './Sidebar';
 import ChatWindow from './ChatWindow';
@@ -16,6 +17,9 @@ export default function Chat() {
   const [selectedDirectUserId, setSelectedDirectUserId] = useState<string | null>(null);
   const [selectedDirectUser, setSelectedDirectUser] = useState<any>(null);
   const sidebarRef = useRef<any>(null);
+
+  // Проверяем токен при старте и периодически
+  useAuthGuard();
 
   // Calculate total unread count
   const totalUnreadCount = Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
@@ -42,19 +46,17 @@ export default function Chat() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [sidebarOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sidebarOpen]);
 
-  // Автоматически сворачивать меню при выборе комнаты
   useEffect(() => {
     if (currentRoom) {
       closeSidebar();
       setSelectedDirectUserId(null);
     }
-  }, [currentRoom]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentRoom]);
 
   const handleOpenDirectMessage = async (userId: string, userInfo?: any) => {
     try {
-      console.log('Opening direct message with user:', userId);
       
       // Устанавливаем выбранного пользователя сразу
       setSelectedDirectUserId(userId);
@@ -85,7 +87,6 @@ export default function Chat() {
 
       if (response.ok) {
         const data = await response.json();
-        console.log('Conversation created/found:', data);
         
         // Сохраняем информацию о пользователе
         setSelectedDirectUser(data.participant);

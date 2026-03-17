@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Users, Bell, MessageCircle, Heart, Sun, Moon, Ban, Lock, Download, X } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { useChatStore } from '@/store/chatStore';
-import { API_URL, getDirectApiUrl } from '@/utils/api';
+import { API_URL, getDirectApiUrl, buildAvatarUrl } from '@/utils/api';
 import NotificationSettings from '@/components/UI/NotificationSettings';
 import ReactionsEditor from '@/components/Admin/ReactionsEditor';
 import UserSearchModal from '@/components/UI/UserSearchModal';
@@ -26,6 +26,8 @@ interface SidebarProps {
 
 const Sidebar = forwardRef<any, SidebarProps>(({ onOpenDirectMessage, selectedDirectUserId, socket }, ref) => {
   const { user, token } = useAuthStore();
+
+  const getAvatarUrl = (avatar?: string) => buildAvatarUrl(avatar);
   const { rooms, setRooms, joinRoom, currentRoom, isConnected, unreadCounts } = useChatStore();
   const { permission, isSubscribed, subscribe, unsubscribe, error: pushError, refreshSubscriptionStatus } = usePushNotifications(token);
   const [showCreateRoom, setShowCreateRoom] = useState(false);
@@ -189,6 +191,7 @@ const Sidebar = forwardRef<any, SidebarProps>(({ onOpenDirectMessage, selectedDi
       setShowUserProfile(false);
       setShowPasswordModal(false);
       setShowInstallGuide(false);
+      setShowUserSearchModal(false);
     }
   }));
 
@@ -199,8 +202,6 @@ const Sidebar = forwardRef<any, SidebarProps>(({ onOpenDirectMessage, selectedDi
     } else {
       // Fallback на локальную реализацию
       try {
-        console.log('Opening direct message with user:', userId);
-        
         const response = await fetch(`${getDirectApiUrl()}/conversations`, {
           method: 'POST',
           headers: {
@@ -209,14 +210,12 @@ const Sidebar = forwardRef<any, SidebarProps>(({ onOpenDirectMessage, selectedDi
             'userid': user?.id || ''
           },
           body: JSON.stringify({ participantId: userId })
-        });
+      });
 
-        if (response.ok) {
-          const data = await response.json();
-          console.log('Conversation created/found:', data);
-          
-          setActiveTab('direct');
-          setShowUserProfile(false);
+      if (response.ok) {
+        await response.json();
+        setActiveTab('direct');
+        setShowUserProfile(false);
         } else {
           const error = await response.json();
           alert(error.error || 'Ошибка создания чата');
@@ -238,8 +237,11 @@ const Sidebar = forwardRef<any, SidebarProps>(({ onOpenDirectMessage, selectedDi
             onClick={() => setShowUserProfile(true)}
           >
             <div className="relative">
-              <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center text-white font-semibold transition-all hover-lift">
-                {user?.username?.[0]?.toUpperCase()}
+              <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center text-white font-semibold transition-all hover-lift overflow-hidden">
+                {getAvatarUrl(user?.avatar)
+                  ? <img src={getAvatarUrl(user?.avatar)!} alt="avatar" className="w-full h-full object-cover" />
+                  : user?.username?.[0]?.toUpperCase()
+                }
               </div>
               {isConnected && (
                 <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white dark:border-gray-800 pulse-ring"></div>
@@ -361,8 +363,11 @@ const Sidebar = forwardRef<any, SidebarProps>(({ onOpenDirectMessage, selectedDi
                   >
                     <div className="flex items-center space-x-3">
                       <div className="relative">
-                        <div className="w-8 h-8 bg-gray-300 dark:bg-gray-600 rounded-full flex items-center justify-center">
-                          <Users size={16} />
+                        <div className="w-8 h-8 bg-gray-300 dark:bg-gray-600 rounded-full flex items-center justify-center overflow-hidden">
+                          {buildAvatarUrl((room as any).avatar)
+                            ? <img src={buildAvatarUrl((room as any).avatar)!} alt="room" className="w-full h-full object-cover" />
+                            : <Users size={16} />
+                          }
                         </div>
                         {room.members.filter(m => m.isOnline).length > 0 && (
                           <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border border-white dark:border-gray-800"></div>

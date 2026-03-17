@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { Heart, Loader } from 'lucide-react';
-import { getUserApiUrl } from '@/utils/api';
+import { buildAvatarUrl, createAuthHeaders, fetchJson, getUserApiUrl } from '@/utils/api';
 import { useAuthStore } from '@/store/authStore';
 import UserProfileCard from '@/components/User/UserProfileCard';
 
@@ -10,6 +10,7 @@ interface FavoriteUser {
   _id: string;
   username: string;
   displayName?: string;
+  avatar?: string;
   role: 'user' | 'moderator' | 'admin';
   isOnline: boolean;
 }
@@ -24,28 +25,22 @@ export default function FavoritesList({ onOpenDirectMessage }: FavoritesListProp
   const [selectedUser, setSelectedUser] = useState<FavoriteUser | null>(null);
   const { token } = useAuthStore();
 
-  useEffect(() => {
-    fetchFavorites();
-  }, []);
-
-  const fetchFavorites = async () => {
+  const fetchFavorites = useCallback(async () => {
     try {
-      const response = await fetch(`${getUserApiUrl()}/favorites`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+      const data = await fetchJson<{ favorites?: FavoriteUser[] }>(`${getUserApiUrl()}/favorites`, {
+        headers: createAuthHeaders(token),
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        setFavorites(data.favorites || []);
-      }
+      setFavorites(data.favorites || []);
     } catch (error) {
       console.error('Failed to fetch favorites:', error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [token]);
+
+  useEffect(() => {
+    fetchFavorites();
+  }, [fetchFavorites]);
 
   if (loading) {
     return (
@@ -74,8 +69,11 @@ export default function FavoritesList({ onOpenDirectMessage }: FavoritesListProp
               >
                 <div className="flex items-center gap-3">
                   <div className="relative">
-                    <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center text-white font-semibold">
-                      {user.username[0].toUpperCase()}
+                    <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center text-white font-semibold overflow-hidden">
+                      {buildAvatarUrl(user.avatar)
+                        ? <img src={buildAvatarUrl(user.avatar)!} alt="avatar" className="w-full h-full object-cover" />
+                        : user.username[0].toUpperCase()
+                      }
                     </div>
                     {user.isOnline && (
                       <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white dark:border-gray-800"></div>
