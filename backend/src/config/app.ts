@@ -63,6 +63,49 @@ export function getPublicOrigin(): string | null {
   return trimTrailingSlash(process.env.PUBLIC_ORIGIN);
 }
 
+export function getAllowedOriginPatterns(): string[] {
+  return (process.env.ALLOWED_ORIGIN_PATTERNS?.split(',') ?? [])
+    .map((pattern) => pattern.trim())
+    .filter(Boolean);
+}
+
+function matchesHostPattern(hostname: string, pattern: string): boolean {
+  const normalizedHost = hostname.toLowerCase();
+  const normalizedPattern = pattern.toLowerCase();
+
+  if (normalizedPattern.startsWith('*.')) {
+    const suffix = normalizedPattern.slice(2);
+    return normalizedHost === suffix || normalizedHost.endsWith(`.${suffix}`);
+  }
+
+  return normalizedHost === normalizedPattern;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function matchesOriginPattern(origin: string, pattern: string): boolean {
+  const normalizedOrigin = trimTrailingSlash(origin);
+  if (!normalizedOrigin) {
+    return false;
+  }
+
+  try {
+    const parsedOrigin = new URL(normalizedOrigin);
+
+    if (pattern.includes('://')) {
+      const normalizedPattern = trimTrailingSlash(pattern) || '';
+      const regex = new RegExp(`^${escapeRegex(normalizedPattern).replace(/\\\*/g, '.*')}$`, 'i');
+      return regex.test(normalizedOrigin);
+    }
+
+    return matchesHostPattern(parsedOrigin.hostname, pattern);
+  } catch {
+    return false;
+  }
+}
+
 export function getDirectFrontendOrigin(): string {
   return buildOrigin(getAppProtocol(), getAppHost(), getFrontendPort());
 }
@@ -95,6 +138,23 @@ export function getAllowedOrigins(): string[] {
   });
 
   return Array.from(allowed);
+}
+
+export function isAllowedOrigin(origin?: string): boolean {
+  if (!origin) {
+    return true;
+  }
+
+  const normalizedOrigin = trimTrailingSlash(origin);
+  if (!normalizedOrigin) {
+    return true;
+  }
+
+  if (getAllowedOrigins().includes(normalizedOrigin)) {
+    return true;
+  }
+
+  return getAllowedOriginPatterns().some((pattern) => matchesOriginPattern(normalizedOrigin, pattern));
 }
 
 export function getDefaultMongoUri(): string {

@@ -5,7 +5,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { connectDB } from './config/database.js';
 import { connectRedis } from './config/redis.js';
-import { getAllowedOrigins, getBackendPort } from './config/app.js';
+import { getAllowedOriginPatterns, getAllowedOrigins, getBackendPort, isAllowedOrigin } from './config/app.js';
 import { setupSocketHandlers } from './socket/handlers.js';
 import authRoutes from './routes/auth.js';
 import chatRoutes from './routes/chat.js';
@@ -18,6 +18,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { errorHandler, notFoundHandler, requestContextMiddleware } from './middleware/errorHandler.js';
 import { logger } from './utils/logger.js';
+import { ensureAdminFromEnv } from './bootstrap/admin.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,8 +26,13 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const server = createServer(app);
 
-function isAllowedOrigin(origin?: string): boolean {
-  return !origin || getAllowedOrigins().includes(origin);
+function corsOriginHandler(origin: string | undefined, callback: (error: Error | null, allow?: boolean) => void): void {
+  if (isAllowedOrigin(origin)) {
+    callback(null, true);
+    return;
+  }
+
+  callback(new Error(`CORS blocked for origin: ${origin}`));
 }
 
 // Middleware
@@ -36,14 +42,7 @@ app.use(helmet({
   contentSecurityPolicy: false
 }));
 app.use(cors({
-  origin: (origin, callback) => {
-    if (isAllowedOrigin(origin)) {
-      callback(null, true);
-      return;
-    }
-
-    callback(new Error(`CORS blocked for origin: ${origin}`));
-  },
+  origin: corsOriginHandler,
   credentials: true
 }));
 app.use(express.json({ limit: '15mb' }));
@@ -66,8 +65,9 @@ app.use(errorHandler);
 // Socket.IO setup
 const io = new Server(server, {
   cors: {
-    origin: getAllowedOrigins(),
-    methods: ['GET', 'POST']
+    origin: corsOriginHandler,
+    methods: ['GET', 'POST'],
+    credentials: true
   }
 });
 
@@ -75,16 +75,21 @@ const io = new Server(server, {
 async function startServer() {
   try {
     await connectDB();
+    await ensureAdminFromEnv();
     await connectRedis();
 
     setupSocketHandlers(io);
 
     const backendPort = getBackendPort();
     const allowedOrigins = getAllowedOrigins();
+    const allowedOriginPatterns = getAllowedOriginPatterns();
 
     server.listen(backendPort, () => {
       logger.info(`Server running on port ${backendPort}`);
       logger.info(`Allowed origins: ${allowedOrigins.join(', ')}`);
+      if (allowedOriginPatterns.length > 0) {
+        logger.info(`Allowed origin patterns: ${allowedOriginPatterns.join(', ')}`);
+      }
     });
   } catch (error) {
     logger.error('Failed to start server', error);
