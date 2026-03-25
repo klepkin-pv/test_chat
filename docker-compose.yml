@@ -2,9 +2,9 @@ version: '3.8'
 
 services:
   mongodb:
-    image: mongo:latest
+    image: mongo:4.4
     container_name: chatreal_mongodb
-    restart: unless-stopped
+    restart: always
     ports:
       - "${MONGODB_PORT:-27018}:27017"
     environment:
@@ -17,7 +17,7 @@ services:
   redis:
     image: redis:latest
     container_name: chatreal_redis
-    restart: unless-stopped
+    restart: always
     ports:
       - "${REDIS_PORT:-6380}:6379"
     volumes:
