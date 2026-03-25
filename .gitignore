@@ -108,3 +108,4 @@ Thumbs.db
 # Docker
 .docker/
 bin/
+upload/

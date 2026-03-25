@@ -1,7 +1,7 @@
 const DEFAULT_PROTOCOL = process.env.NEXT_PUBLIC_APP_PROTOCOL || 'http';
 const DEFAULT_HOST = process.env.NEXT_PUBLIC_APP_HOST || 'localhost';
-const NGINX_PORT = process.env.NEXT_PUBLIC_NGINX_PORT || '5175';
-const FRONTEND_PORT = process.env.NEXT_PUBLIC_FRONTEND_PORT || '5176';
+const NGINX_PORT = process.env.NEXT_PUBLIC_NGINX_PORT || '5176';
+const FRONTEND_PORT = process.env.NEXT_PUBLIC_FRONTEND_PORT || '5175';
 const BACKEND_PORT = process.env.NEXT_PUBLIC_BACKEND_PORT || '4000';
 
 function trimTrailingSlash(value?: string | null): string | null {

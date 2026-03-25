@@ -4,8 +4,8 @@ import { fileURLToPath } from 'url';
 
 const DEFAULT_PROTOCOL = 'http';
 const DEFAULT_HOST = 'localhost';
-const DEFAULT_NGINX_PORT = '5175';
-const DEFAULT_FRONTEND_PORT = '5176';
+const DEFAULT_NGINX_PORT = '5176';
+const DEFAULT_FRONTEND_PORT = '5175';
 const DEFAULT_BACKEND_PORT = '4000';
 const DEFAULT_MONGODB_PORT = '27018';
 const DEFAULT_REDIS_PORT = '6380';

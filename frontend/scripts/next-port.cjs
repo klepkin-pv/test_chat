@@ -40,10 +40,11 @@ const workspaceRoot = path.resolve(projectRoot, '..');
 loadEnvFile(path.join(workspaceRoot, '.env'));
 loadEnvFile(path.join(projectRoot, '.env.local'));
 
-const port = process.env.FRONTEND_PORT || process.env.NEXT_PUBLIC_FRONTEND_PORT || '5176';
+const port = process.env.FRONTEND_PORT || process.env.NEXT_PUBLIC_FRONTEND_PORT || '5175';
+const host = process.env.FRONTEND_HOST || '0.0.0.0';
 const nextBin = path.join(projectRoot, 'node_modules', 'next', 'dist', 'bin', 'next');
 
-const child = spawn(process.execPath, [nextBin, mode, '-p', port], {
+const child = spawn(process.execPath, [nextBin, mode, '-H', host, '-p', port], {
   cwd: projectRoot,
   env: process.env,
   stdio: 'inherit',
