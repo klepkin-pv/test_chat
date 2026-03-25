@@ -2,20 +2,14 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package files
 COPY backend/package*.json ./
-
-# Install dependencies
 RUN npm ci
 
-# Copy source code
-COPY backend/ .
-
-# Build the application
+COPY backend/ ./
 RUN npm run build
 
-# Expose port
+RUN mkdir -p /app/uploads
+
 EXPOSE 4000
 
-# Start the application
-CMD ["npm", "run", "dev"]
+CMD ["npm", "run", "start"]

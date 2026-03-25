@@ -34,7 +34,6 @@ services:
     ports:
       - "${PORT:-4000}:${PORT:-4000}"
     environment:
-      - NODE_ENV=development
       - APP_PROTOCOL=${APP_PROTOCOL:-http}
       - APP_HOST=${APP_HOST:-localhost}
       - PUBLIC_ORIGIN=${PUBLIC_ORIGIN:-http://localhost:5175}
@@ -51,8 +50,6 @@ services:
       - mongodb
       - redis
     volumes:
-      - ./backend:/app
-      - /app/node_modules
       - ./data/uploads:/app/uploads
     networks:
       - chatreal_network
@@ -76,10 +73,6 @@ services:
       - NEXT_PUBLIC_SOCKET_URL=${NEXT_PUBLIC_SOCKET_URL:-http://localhost:5175}
     depends_on:
       - backend
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
     networks:
       - chatreal_network
 
